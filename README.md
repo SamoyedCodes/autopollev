@@ -1,54 +1,62 @@
-# 🗳️ AutoPollEv (PollEverywhere Automation & GUI Tool)
+# AutoPollEv (Poll Everywhere automation and GUI tool)
 
-AutoPollEv is an advanced monitoring and voting tool for [PollEverywhere](https://pollev.com/). It monitors presenter activity in real time and supports interactive or automatic voting.
+AutoPollEv watches a [Poll Everywhere](https://pollev.com/) presenter for new
+polls and votes on them, either by asking you first or automatically.
 
-Detailed architecture, detection-failure analysis, remediation notes, tests,
-and troubleshooting are available in
-[docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md).
+For how it works internally, why poll detection failed at first, and how that
+was fixed, see [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md).
 
-### ✨ Key Features
-- **Real-time Monitoring**: Low-latency detection of new polls via Firehose.
-- **Interactive Voting**: Pop-up notifications with option buttons and countdown timers.
-- **Auto Fallback**: Automatically submits a random vote if no choice is made within the timeout (default 30s).
-- **GUI Mode**: Compact ChatGPT/Codex-inspired dark Tkinter interface with editable host, monitoring status, resizable vote history, and a toggleable scrolling log.
-- **Built-in Login Browser**: Captures and stores your `polleverywhere_session_id` automatically — no manual DevTools copying — and re-captures it if it expires.
-- **System Notifications**: Native notifications for new polls on macOS and Windows.
-- **Locked Poll Handling**: Automatically records failures if a poll is locked by the presenter.
+### Features
+- Detects new polls through Poll Everywhere's Firehose endpoint, so there is
+  very little delay.
+- Shows a popup with a button per option and a countdown, so you can pick an
+  answer yourself.
+- If you do not answer before the countdown ends (30 seconds by default), it
+  picks a random option and submits that.
+- Dark-themed Tkinter GUI with an editable host field, monitoring status, a
+  resizable vote history table, and a log panel you can show or hide.
+- Logs you in through a built-in browser window and stores the session cookie
+  itself, so you never have to copy anything out of DevTools. If the cookie
+  expires later, it logs in again on its own.
+- Desktop notifications on macOS and Windows when a new poll appears.
+- If the presenter locks a poll before you answer, that gets recorded as a
+  failed vote instead of crashing.
 
-### 🚀 Getting Started
-1. **Clone & Install** (recommended: a Conda/Miniforge environment named `pollev`):
+### Getting started
+1. **Install.** A Conda or Miniforge environment is easiest:
    ```bash
    git clone https://github.com/SamoyedCodes/autopollev.git
    cd autopollev
    conda create -n pollev python=3.11
    conda activate pollev
    pip install -r requirements.txt
-   playwright install chromium          # browser used by the built-in login window
+   playwright install chromium
    ```
-   Conda/Miniforge Python bundles Tk, so the Tkinter GUI works out of the box. The
-   included `.vscode/settings.json` already points VS Code at this `pollev` interpreter.
+   That last line installs the browser used by the login window. Conda's Python
+   already includes Tk, so the GUI works without extra setup.
 
-   Prefer a plain virtualenv? Use `python3 -m venv .venv && source .venv/bin/activate`,
-   then the same `pip install` / `playwright install` steps. On Homebrew Python you'll
-   also need Tk once: `brew install python-tk@3.11` (match your Python version; no sudo).
-2. **Log in — no manual cookie copying**:
-   AutoPollEv has a built-in login browser that captures and stores your
-   `polleverywhere_session_id` for you. Just:
-   - `python main.py --gui`, then click **Log in**, **or**
-   - `python main.py --login` (captures from the terminal, then exits).
+   A plain virtualenv works too:
+   `python3 -m venv .venv && source .venv/bin/activate`, then the same two
+   install commands. If you are on Homebrew Python you need Tk once as well:
+   `brew install python-tk@3.11` (match your Python version, no sudo needed).
 
-   A Chromium window opens at `pollev.com`; log in normally and it closes itself
-   once your session is captured and saved to `config.json`. Right after capture,
-   AutoPollEv shows the **email of the account it read** (in both the GUI status
-   panel and the CLI) so you can confirm the right PollEv account was captured.
-   The login is remembered (in `.pw_profile/`), so if the session later expires
-   while monitoring, AutoPollEv **re-captures it automatically** and keeps going.
+2. **Log in.** You do not need to copy a cookie by hand. Either run
+   `python main.py --gui` and click **Log in**, or run `python main.py --login`
+   to do it from the terminal and exit afterwards.
 
-   `config.json` ships with the placeholder host `your-presenter-id`. Enter your own Poll Everywhere presenter ID in the GUI's **Host** field and click
-   **Save**. If monitoring is already active, AutoPollEv safely restarts it for the
-   new presenter. The value is also persisted to `config.json` for future runs.
+   A Chromium window opens on pollev.com. Log in like normal and the window
+   closes once the session cookie has been saved to `config.json`. The email
+   address of the account it captured is then shown in the GUI and in the
+   terminal, so you can check it grabbed the right account. The login is kept in
+   `.pw_profile/`, so if the session expires while monitoring is running, it
+   logs back in and carries on.
 
-   `config.json` is generated on first run and can still be edited manually:
+   `config.json` starts with `your-presenter-id` as a placeholder host. Put the
+   real presenter ID in the **Host** field in the GUI and click **Save**. If
+   monitoring is already running it will restart on the new presenter, and the
+   value is written to `config.json` for next time.
+
+   `config.json` is created on the first run and can be edited by hand:
    ```json
    {
      "host": "your-presenter-id",
@@ -59,77 +67,85 @@ and troubleshooting are available in
      "log_dir": "logs"
    }
    ```
-   | Field | Description |
+   | Field | What it does |
    |---|---|
-   | `host` | Presenter ID on PollEverywhere |
-   | `polleverywhere_session_id` | Session cookie — captured for you by the login browser |
-   | `poll_interval` | Polling interval in seconds |
-   | `answer_delay` | Delay before submitting vote (seconds) |
-   | `user_choice_timeout` | Seconds to wait for user choice before auto-submitting |
-   | `log_dir` | Directory for run logs and vote history (default `logs/`) |
+   | `host` | The presenter's ID on Poll Everywhere |
+   | `polleverywhere_session_id` | Session cookie, filled in by the login window |
+   | `poll_interval` | How often to check for a new poll, in seconds |
+   | `answer_delay` | How long to wait before submitting a vote, in seconds |
+   | `user_choice_timeout` | How long to wait for your answer before voting randomly |
+   | `log_dir` | Where run logs and vote history go (`logs/` by default) |
 
-   (You can still paste the cookie in by hand from the browser DevTools if you prefer.)
-3. **Run**:
-   | Command | Mode |
+   Pasting the cookie in yourself from DevTools still works if you would rather
+   do that.
+
+3. **Run it.**
+   | Command | What it does |
    |---|---|
-   | `python main.py` | GUI (default) |
-   | `python main.py --gui` | GUI — includes the login/capture button |
-   | `python main.py --login` | Capture the session cookie, then exit |
-   | `python main.py --cli` | Interactive terminal — notifies and waits for your choice |
-   | `python main.py --auto` | Fully automatic — silent random vote |
-   | `python main.py --history` | Print vote history and statistics, then exit |
+   | `python main.py` | GUI (the default) |
+   | `python main.py --gui` | Same, and includes the login button |
+   | `python main.py --login` | Capture the session cookie and exit |
+   | `python main.py --cli` | Terminal mode, asks before each vote |
+   | `python main.py --auto` | Votes randomly with no prompting |
+   | `python main.py --history` | Print past votes and stats, then exit |
 
-   `--config PATH` points any of these at an alternate config file.
+   Add `--config PATH` to any of these to use a different config file.
 
-### 🗂️ Project Layout
+### Project layout
 ```
-main.py               CLI entry point and mode dispatch
+main.py               entry point, picks which mode to run
 autopollev/
-  config.py           config.json load / validate / save
-  auth.py             session cookie validation, account identity
-  session_capture.py  Playwright login window that captures the cookie
-  monitor.py          Firehose poll detection
-  voter.py            vote submission (random and interactive)
-  gui.py              Tkinter interface
-  notifier.py         native desktop notifications
-  logger.py           run log + vote history (JSONL)
-  endpoints.py        PollEverywhere URLs
-  i18n.py             user-facing strings
-docs/TECHNICAL_REPORT.md   detection-failure analysis and remediation
+  config.py           loads, validates and saves config.json
+  auth.py             checks the session cookie, reads the account identity
+  session_capture.py  Playwright login window that grabs the cookie
+  monitor.py          poll detection through Firehose
+  voter.py            submits votes, random or chosen
+  gui.py              the Tkinter interface
+  notifier.py         desktop notifications
+  logger.py           run log and vote history (JSONL)
+  endpoints.py        Poll Everywhere URLs
+  i18n.py             strings shown to the user
+docs/TECHNICAL_REPORT.md   how detection failed and how it was fixed
 tests/                unittest suite
 ```
 
-### 📦 Windows Release
-Tagging a version builds the Windows bundle on GitHub Actions
-(`.github/workflows/release.yml`) and attaches `AutoPollEv-windows.zip` to the
-release:
+### Windows build
+Pushing a version tag makes GitHub Actions build the Windows version and attach
+`AutoPollEv-windows.zip` to the release. The workflow is in
+[.github/workflows/release.yml](.github/workflows/release.yml).
+
 ```bash
 git tag v2.0.0 && git push origin v2.0.0
 ```
-Chromium is baked into the bundle, so users just unzip and run
-`AutoPollEv.exe` — `config.json`, `logs/` and `.pw_profile/` are written next to
-the executable. The build is windowed (GUI only, no console); `--cli`, `--auto`,
-`--login` and `--history` are source-run modes and fall back to the GUI there.
 
-Use the workflow's **Run workflow** button to build a test zip
-without tagging.
+Chromium is included in the zip, so it is just unzip and run
+`AutoPollEv.exe`. `config.json`, `logs/` and `.pw_profile/` are written next to
+the exe. The build has no console window, so `--cli`, `--auto`, `--login` and
+`--history` do not work there and fall back to the GUI. Run those from source
+instead.
 
-**Defender false positives:** the build is unsigned, so Windows Defender's ML
-heuristics may quarantine it as `Trojan:Win32/Bearfoos.A!ml`. `--noupx` and the
-version resource reduce this; report any hit at
-<https://www.microsoft.com/en-us/wdsi/filesubmission> to get it cleared for
-everyone. A code-signing certificate is the only durable fix.
+There is a **Run workflow** button on the Actions page if you want a test build
+without tagging anything.
 
-### 🧪 Tests
-Stdlib `unittest` only — no test dependencies:
+One thing to know: the exe is not code signed, so Windows Defender sometimes
+flags it as `Trojan:Win32/Bearfoos.A!ml`. It is a false positive. Building with
+`--noupx` and a version resource makes it happen less often. If you hit it, you
+can report the file at
+<https://www.microsoft.com/en-us/wdsi/filesubmission> and it gets cleared for
+everyone. Buying a code signing certificate is the only real fix.
+
+### Tests
+Plain `unittest`, nothing extra to install:
 ```bash
 python -m unittest discover -s tests
 ```
-`tests/gui_smoke.py` is a manual GUI check, run directly; add `--preview` to
-leave the mock windows open for inspection:
+
+`tests/gui_smoke.py` is a manual check of the GUI, so run it directly. Pass
+`--preview` to keep the windows open so you can look at them:
 ```bash
 python tests/gui_smoke.py --preview
 ```
 
-### ⚠️ Disclaimer
-This tool is for educational purposes only. Please comply with the terms of service of the target platform and your institution.
+### Disclaimer
+This was written as a learning project. Check the terms of service of the site
+and the rules of your institution before using it.
