@@ -170,7 +170,7 @@ class Voter:
 
         except CookieExpiredError:
             raise
-        except VoteError as e:
+        except (AuthError, VoteError) as e:
             logger.error(_("vote.error", error=e))
             self.history.record_vote(
                 poll_id=poll_uid, poll_title="fetch_failed",
@@ -182,13 +182,16 @@ class Voter:
             logger.error(_("vote.unknown_error", error=e))
             return None
 
-    def interactive_vote(self, poll_uid: str, timeout: float = 30) -> Optional[dict]:
+    def interactive_vote(self, poll_uid: str, timeout: float = 30,
+                         should_stop=None) -> Optional[dict]:
         """
         Interactive vote: show options, wait for user input, auto-submit a
         random choice on timeout.
 
         :param poll_uid: poll unique identifier
         :param timeout: seconds to wait for user input
+        :param should_stop: called while waiting; truthy means the user asked
+            to quit, so no vote is submitted
         :return: the vote response data, or None
         """
         try:
@@ -227,7 +230,15 @@ class Voter:
             print(f"  \033[90m{'─'*50}\033[0m")
 
             # Wait for user input (with timeout)
-            user_choice = self._input_with_timeout(timeout, len(options))
+            user_choice = self._input_with_timeout(
+                timeout, len(options), should_stop
+            )
+
+            if should_stop is not None and should_stop():
+                # Ctrl-C during the countdown used to be ignored: the prompt
+                # ran to timeout and voted anyway on the way out.
+                logger.info(_("vote.aborted"))
+                return None
 
             if user_choice is not None:
                 selected = options[user_choice]
@@ -243,7 +254,7 @@ class Voter:
 
         except CookieExpiredError:
             raise
-        except VoteError as e:
+        except (AuthError, VoteError) as e:
             logger.error(f"❌ Vote failed: {e}")
             self.history.record_vote(
                 poll_id=poll_uid, poll_title="fetch_failed",
@@ -255,16 +266,36 @@ class Voter:
             logger.error(f"❌ Unknown error: {e}")
             return None
 
-    def _input_with_timeout(self, timeout: float, max_option: int) -> Optional[int]:
+    @staticmethod
+    def _stdin_is_tty() -> bool:
+        """Whether there is a terminal to read single keystrokes from."""
+        try:
+            return sys.stdin is not None and sys.stdin.isatty()
+        except (AttributeError, ValueError, OSError):
+            return False
+
+    def _input_with_timeout(self, timeout: float, max_option: int,
+                            should_stop=None) -> Optional[int]:
         """
         User input with a timeout and countdown. Avoids the built-in input()
         so it does not block background threads.
 
         :param timeout: timeout in seconds
         :param max_option: the highest valid option number
+        :param should_stop: called each tick; truthy aborts the wait
         :return: the selected option index (0-based), or None (on timeout)
         """
-        import sys
+        if not self._stdin_is_tty():
+            # Piped stdin, a service, an IDE console: putting the terminal in
+            # cbreak mode raises there, which used to abandon the vote
+            # entirely. Wait the countdown out and let the caller pick.
+            logger.info(_("vote.no_terminal", timeout=int(timeout)))
+            end_time = time.time() + timeout
+            while time.time() < end_time:
+                if should_stop is not None and should_stop():
+                    return None
+                time.sleep(0.1)
+            return None
 
         start_time = time.time()
         result_str = ""
@@ -280,6 +311,8 @@ class Voter:
 
         try:
             while time.time() - start_time < timeout:
+                if should_stop is not None and should_stop():
+                    return None
                 remaining = int(timeout - (time.time() - start_time))
                 if remaining != last_remaining:
                     # \033[K clears to end of line

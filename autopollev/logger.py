@@ -137,8 +137,14 @@ class VoteHistoryLogger:
         with open(self.log_file, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # A crash mid-append leaves a torn last line. Skip it
+                    # rather than losing every record behind it.
+                    continue
 
         # Return the last N records, newest first
         return records[-limit:][::-1]

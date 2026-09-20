@@ -64,6 +64,8 @@ TRANSLATIONS: dict[str, str] = {
     'vote.success': '✅ Vote submitted! Chose [{choice}]',
     'vote.fail': '⚠️ Vote may have failed (HTTP {code}): {text}',
     'vote.locked': '🔒 Poll is locked by the presenter, recording as failed.',
+    'vote.aborted': 'Stopping — no vote submitted.',
+    'vote.no_terminal': 'No terminal for input; picking randomly in {timeout}s.',
     'vote.error': '❌ Vote failed: {error}',
     'vote.unknown_error': '❌ Unknown error: {error}',
     'vote.user_choice': '👤 User selected: {choice}',

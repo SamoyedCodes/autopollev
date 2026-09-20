@@ -16,6 +16,7 @@ import sys
 import time
 import signal
 
+from autopollev import __version__
 from autopollev.config import Config, ConfigError
 from autopollev.auth import (Auth, AuthError, CookieExpiredError,
                              PresenterNotFoundError, account_summary)
@@ -54,11 +55,14 @@ def _show_startup_error(message: str):
 
 def print_banner():
     subtitle = _("banner.subtitle")
-    # Fixed-width banner: pad subtitle to 36 chars
-    padded = subtitle.ljust(36)
+    # Fixed-width banner: pad the subtitle so the box closes (3 + 39 = 42)
+    padded = subtitle.ljust(39)
+    # 42 = the box interior; the emoji are two code points each, and each
+    # renders two columns, so len() and the drawn width agree here.
+    title = f"🗳️  AutoPollEv v{__version__}  🗳️".center(42)
     banner = f"""
 \033[96m╔══════════════════════════════════════════╗
-║         🗳️  AutoPollEv v2.0.0  🗳️        ║
+║{title}║
 ║   {padded}║
 ╚══════════════════════════════════════════╝\033[0m
 """
@@ -149,7 +153,8 @@ def run_cli(config: Config, auto_mode: bool = False):
                     else:
                         result = voter.interactive_vote(
                             poll_uid,
-                            timeout=config.user_choice_timeout
+                            timeout=config.user_choice_timeout,
+                            should_stop=lambda: _shutdown,
                         )
 
                     if result and result.get("status") == "success":
@@ -171,7 +176,7 @@ def run_cli(config: Config, auto_mode: bool = False):
 
                 try:
                     input()
-                    config = Config()
+                    config = Config(config.config_path)
                     auth.refresh_session(config.cookies)
                     auth.validate_cookie()
                     logger.info(_("main.cookie_refreshed"))
