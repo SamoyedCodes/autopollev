@@ -19,7 +19,7 @@ import textwrap
 from typing import Optional
 
 from .config import Config, ConfigError
-from .auth import Auth, AuthError, CookieExpiredError, account_summary
+from .auth import Auth, AuthError, CookieExpiredError, PresenterNotFoundError, account_summary
 from .monitor import PollMonitor
 from .voter import Voter, VoteError
 from .logger import setup_logger, VoteHistoryLogger
@@ -583,13 +583,11 @@ class AutoPollEvGUI:
                         ("capture_status", _("gui.session.silent_try"))
                     )
                     cookies = session_capture.capture_session_id(
-                        host=self.config.host, timeout=12,
-                        on_status=status, headless=True,
+                        timeout=12, on_status=status, headless=True,
                     )
                 if not cookies:
                     cookies = session_capture.capture_session_id(
-                        host=self.config.host, timeout=300,
-                        on_status=status, headless=False,
+                        timeout=300, on_status=status, headless=False,
                     )
 
                 if cookies:
@@ -701,6 +699,13 @@ class AutoPollEvGUI:
         except CookieExpiredError as e:
             messagebox.showerror(_("gui.error.cookie_title"), str(e))
             self.status_label.config(text=_("gui.status.cookie_invalid"), fg=ERROR)
+            return
+        except PresenterNotFoundError as e:
+            messagebox.showerror(
+                _("gui.error.presenter_title"),
+                _("gui.error.presenter", error=e),
+            )
+            self.status_label.config(text=_("gui.status.presenter_invalid"), fg=ERROR)
             return
         except AuthError as e:
             self._append_log(_("gui.log.cookie_warn", error=e))

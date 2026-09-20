@@ -27,6 +27,10 @@ class CookieExpiredError(AuthError):
     """The cookie has expired."""
 
 
+class PresenterNotFoundError(AuthError):
+    """The configured presenter id does not exist — a setting to fix, not a login."""
+
+
 def account_summary(identity: dict) -> str:
     """
     Turn an identity dict (from :meth:`Auth.get_account_identity`) into a single
@@ -128,7 +132,7 @@ class Auth:
                 )
 
             if r.status_code == 404:
-                raise AuthError(
+                raise PresenterNotFoundError(
                     f"Presenter '{self.host}' does not exist. "
                     f"Check the 'host' setting in config.json."
                 )
@@ -146,7 +150,7 @@ class Auth:
                     f"non-JSON body ({r.text[:80]!r})"
                 )
             if "presenter not found" in str(data).lower():
-                raise AuthError(f"Presenter '{self.host}' does not exist.")
+                raise PresenterNotFoundError(f"Presenter '{self.host}' does not exist.")
 
             return True
 

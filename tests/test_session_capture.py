@@ -83,14 +83,14 @@ class SessionCaptureTest(unittest.TestCase):
         ctx = FakeCtx()
         with patch.object(
                  session_capture, "_rejection_reason",
-                 lambda host, c: None
+                 lambda c: None
                  if c["polleverywhere_session_id"] == LOGGED_IN else "not logged in"), \
              patch("playwright.sync_api.sync_playwright", fake_playwright(ctx)), \
              patch("time.sleep", lambda s: None):
-            cookies = session_capture.capture_session_id(host="somehost", timeout=10)
+            cookies = session_capture.capture_session_id(timeout=10)
 
         self.assertEqual(cookies, {"polleverywhere_session_id": LOGGED_IN})
-        self.assertIn("https://pollev.com/somehost", ctx.request.urls)
+        self.assertIn(session_capture.SYNC_URL, ctx.request.urls)
         self.assertTrue(ctx.closed)
 
 

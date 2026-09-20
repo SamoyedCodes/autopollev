@@ -190,7 +190,6 @@ def run_login(config: Config):
     logger.info(_("login.opening"))
     try:
         cookies = capture_session_id(
-            host=config.host,
             on_status=lambda m: logger.info(m),
             headless=False,
         )

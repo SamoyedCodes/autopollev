@@ -14,12 +14,15 @@ from typing import Callable, Optional
 
 from .auth import Auth, AuthError, CookieExpiredError
 from .config import app_dir
-from .endpoints import ENDPOINTS
 from .logger import setup_logger
 
 logger = setup_logger("autopollev.session_capture")
 
 LOGIN_URL = "https://pollev.com/login"
+
+# Any pollev.com page completes the handoff from the id.polleverywhere.com
+# login. /home needs no presenter id, so capture works before one is set.
+SYNC_URL = "https://pollev.com/home"
 
 # Session cookie names we care about (polleverywhere_session_id preferred).
 SESSION_KEYS = ("polleverywhere_session_id", "pe_auth_token")
@@ -56,18 +59,19 @@ def _cookie_domains(ctx) -> str:
         return "(unknown)"
 
 
-def _rejection_reason(host: str, cookies: dict) -> Optional[str]:
+def _rejection_reason(cookies: dict) -> Optional[str]:
     """
     Return None when the cookie is a logged-in session, else why it is not.
 
-    PollEv creates a valid participant session on the login page, so a successful
-    registration_info response alone does not prove that login is complete. The
-    reason is what makes a failed capture diagnosable from a log alone.
+    Asks the profile endpoint only. Whether the configured presenter exists is a
+    separate question — checking it here made a wrong presenter id look like an
+    unfinished login, forever. PollEv also creates a valid participant session
+    on the login page, so the session cookie alone proves nothing; an account on
+    the profile is what proves the login finished.
     """
     try:
-        auth = Auth(host=host, cookies=cookies)
+        auth = Auth(host="", cookies=cookies)
         try:
-            auth.validate_cookie()
             identity = auth.get_account_identity()
             if identity.get("email") or identity.get("name") or identity.get("username"):
                 return None
@@ -82,7 +86,6 @@ def _rejection_reason(host: str, cookies: dict) -> Optional[str]:
 
 
 def capture_session_id(
-    host: str,
     profile_dir: str = DEFAULT_PROFILE_DIR,
     login_url: str = LOGIN_URL,
     timeout: float = 300,
@@ -92,7 +95,6 @@ def capture_session_id(
     """
     Open the login window and capture a valid PollEv session cookie.
 
-    :param host: presenter id, used to validate the cookie.
     :param profile_dir: persistent browser profile directory (stores the login).
     :param login_url: login page URL.
     :param timeout: maximum seconds to wait for the user to finish logging in.
@@ -170,7 +172,7 @@ def capture_session_id(
                 reason = "no pollev.com session cookie yet"
                 if candidate.get("polleverywhere_session_id"):
                     last_candidate = candidate
-                    reason = _rejection_reason(host, candidate)
+                    reason = _rejection_reason(candidate)
                     if reason is None:
                         status("✅ Captured a valid session cookie.")
                         try:
@@ -195,9 +197,7 @@ def capture_session_id(
                 # once a pollev.com page is loaded again, so poke one periodically.
                 if ticks % 3 == 0:
                     try:
-                        ctx.request.get(
-                            ENDPOINTS["home"].format(host=host), timeout=10000
-                        )
+                        ctx.request.get(SYNC_URL, timeout=10000)
                     except Exception:  # noqa: BLE001 - best-effort sync
                         pass
 
@@ -215,7 +215,7 @@ def capture_session_id(
         raise SessionCaptureError(f"Session capture failed: {e}") from e
 
     # Window closed before validation passed: re-check the last candidate once.
-    if last_candidate and _rejection_reason(host, last_candidate) is None:
+    if last_candidate and _rejection_reason(last_candidate) is None:
         return last_candidate
 
     status(

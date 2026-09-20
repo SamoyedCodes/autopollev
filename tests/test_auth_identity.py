@@ -93,25 +93,33 @@ class AccountSummaryTests(unittest.TestCase):
 class SessionValidationTests(unittest.TestCase):
     @patch("autopollev.session_capture.Auth")
     def test_rejects_anonymous_participant_session(self, auth_class):
-        auth_class.return_value.validate_cookie.return_value = True
         auth_class.return_value.get_account_identity.return_value = {
             "participant_id": 12345678,
         }
 
-        reason = _rejection_reason("presenter", {"polleverywhere_session_id": "x"})
+        reason = _rejection_reason({"polleverywhere_session_id": "x"})
         self.assertIn("anonymous", reason)
 
     @patch("autopollev.session_capture.Auth")
     def test_accepts_logged_in_account_session(self, auth_class):
-        auth_class.return_value.validate_cookie.return_value = True
         auth_class.return_value.get_account_identity.return_value = {
             "email": "jane@example.edu",
             "participant_id": 12345678,
         }
 
-        self.assertIsNone(
-            _rejection_reason("presenter", {"polleverywhere_session_id": "x"})
+        self.assertIsNone(_rejection_reason({"polleverywhere_session_id": "x"}))
+
+    @patch("autopollev.session_capture.Auth")
+    def test_unset_presenter_does_not_block_capture(self, auth_class):
+        """A wrong/placeholder host used to make a finished login look unfinished."""
+        auth_class.return_value.validate_cookie.side_effect = AssertionError(
+            "capture must not check the presenter"
         )
+        auth_class.return_value.get_account_identity.return_value = {
+            "email": "jane@example.edu",
+        }
+
+        self.assertIsNone(_rejection_reason({"polleverywhere_session_id": "x"}))
 
 
 if __name__ == "__main__":
