@@ -1,0 +1,7 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+playwright>=1.40          # internal login browser for auto-capturing the session cookie
+win11toast>=0.34; platform_system == "Windows"
+
+# After installing, download the browser the login window uses:
+#   playwright install chromium
