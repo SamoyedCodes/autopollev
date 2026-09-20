@@ -9,7 +9,7 @@ A tkinter-based interface providing:
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import font as tkfont, ttk, messagebox
 import threading
 import random
 import sys
@@ -30,8 +30,10 @@ from .i18n import _
 
 logger = setup_logger("autopollev.gui")
 
-# Platform-aware fonts: Segoe UI/Consolas on Windows, system font/Menlo on
-# macOS, with a fallback elsewhere.
+# Fonts. These are only the fallbacks: once a root window exists,
+# _adopt_system_fonts() replaces them with whatever the OS draws its own
+# windows in, so the app matches the desktop instead of naming families that
+# may render differently (or not exist) on someone else's machine.
 if sys.platform == "darwin":
     UI_FONT = "Helvetica Neue"
     MONO_FONT = "Menlo"
@@ -41,6 +43,21 @@ elif sys.platform == "win32":
 else:
     UI_FONT = "DejaVu Sans"
     MONO_FONT = "DejaVu Sans Mono"
+
+
+def _adopt_system_fonts(root):
+    """Point UI_FONT/MONO_FONT at the platform's own interface faces.
+
+    Tk's named fonts already resolve to them — .AppleSystemUIFont (SF) and
+    Menlo on macOS, Segoe UI and Consolas on Windows — and both can be
+    requested back by name, so this needs no per-platform table.
+    """
+    global UI_FONT, MONO_FONT
+    try:
+        UI_FONT = tkfont.nametofont("TkDefaultFont", root).actual()["family"]
+        MONO_FONT = tkfont.nametofont("TkFixedFont", root).actual()["family"]
+    except Exception:  # noqa: BLE001 - the per-platform fallbacks still work
+        logger.debug("Falling back to %s/%s", UI_FONT, MONO_FONT)
 
 # Placeholder prefix for an unset session cookie (config.py's default template
 # writes a value that starts with "<").
@@ -218,6 +235,7 @@ class AutoPollEvGUI:
     def __init__(self, config: Config):
         self.config = config
         self.root = tk.Tk()
+        _adopt_system_fonts(self.root)
         self.root.title(_("gui.title"))
         self.root.configure(bg=BG)
         self.root.minsize(600, 420)
