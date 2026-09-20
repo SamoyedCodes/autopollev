@@ -81,8 +81,10 @@ def fake_playwright(ctx):
 class SessionCaptureTest(unittest.TestCase):
     def test_captures_pollev_domain_cookie_after_sync(self):
         ctx = FakeCtx()
-        with patch.object(session_capture, "_validates",
-                          lambda host, c: c["polleverywhere_session_id"] == LOGGED_IN), \
+        with patch.object(
+                 session_capture, "_rejection_reason",
+                 lambda host, c: None
+                 if c["polleverywhere_session_id"] == LOGGED_IN else "not logged in"), \
              patch("playwright.sync_api.sync_playwright", fake_playwright(ctx)), \
              patch("time.sleep", lambda s: None):
             cookies = session_capture.capture_session_id(host="somehost", timeout=10)

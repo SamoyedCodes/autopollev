@@ -6,7 +6,7 @@ from unittest.mock import patch
 import requests
 
 from autopollev.auth import Auth, account_summary
-from autopollev.session_capture import _validates
+from autopollev.session_capture import _rejection_reason
 
 
 class FakeResponse:
@@ -98,7 +98,8 @@ class SessionValidationTests(unittest.TestCase):
             "participant_id": 12345678,
         }
 
-        self.assertFalse(_validates("presenter", {"polleverywhere_session_id": "x"}))
+        reason = _rejection_reason("presenter", {"polleverywhere_session_id": "x"})
+        self.assertIn("anonymous", reason)
 
     @patch("autopollev.session_capture.Auth")
     def test_accepts_logged_in_account_session(self, auth_class):
@@ -108,7 +109,9 @@ class SessionValidationTests(unittest.TestCase):
             "participant_id": 12345678,
         }
 
-        self.assertTrue(_validates("presenter", {"polleverywhere_session_id": "x"}))
+        self.assertIsNone(
+            _rejection_reason("presenter", {"polleverywhere_session_id": "x"})
+        )
 
 
 if __name__ == "__main__":

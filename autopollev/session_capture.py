@@ -37,29 +37,48 @@ class SessionCaptureError(Exception):
     """Session capture failed (e.g. Playwright not installed / Chromium missing)."""
 
 
-def _validates(host: str, cookies: dict) -> bool:
+def _page_url(ctx) -> str:
+    """Current URL of the login window, for diagnostics."""
+    try:
+        return ctx.pages[0].url if ctx.pages else "(no window)"
+    except Exception:  # noqa: BLE001 - diagnostics must never break capture
+        return "(unknown)"
+
+
+def _cookie_domains(ctx) -> str:
+    """Which domains hold a session cookie — names only, never values."""
+    try:
+        return ", ".join(sorted({
+            f"{c['domain']}:{c['name']}"
+            for c in ctx.cookies() if c["name"] in SESSION_KEYS
+        })) or "(none)"
+    except Exception:  # noqa: BLE001 - diagnostics must never break capture
+        return "(unknown)"
+
+
+def _rejection_reason(host: str, cookies: dict) -> Optional[str]:
     """
-    Check that the cookie is usable and belongs to a logged-in account.
+    Return None when the cookie is a logged-in session, else why it is not.
 
     PollEv creates a valid participant session on the login page, so a successful
-    registration_info response alone does not prove that login is complete.
+    registration_info response alone does not prove that login is complete. The
+    reason is what makes a failed capture diagnosable from a log alone.
     """
     try:
         auth = Auth(host=host, cookies=cookies)
         try:
             auth.validate_cookie()
             identity = auth.get_account_identity()
-            return bool(
-                identity.get("email")
-                or identity.get("name")
-                or identity.get("username")
-            )
+            if identity.get("email") or identity.get("name") or identity.get("username"):
+                return None
+            return "profile has no account yet (still an anonymous participant session)"
         finally:
             auth.close()
-    except (CookieExpiredError, AuthError):
-        return False
-    except Exception:  # noqa: BLE001 - network/other errors mean "not valid yet"
-        return False
+    except (CookieExpiredError, AuthError) as e:
+        return str(e)
+    except Exception as e:  # noqa: BLE001 - network/other errors mean "not valid yet"
+        return f"{type(e).__name__}: {e}"
+
 
 
 def capture_session_id(
@@ -148,18 +167,28 @@ def capture_session_id(
                     if c["name"] in SESSION_KEYS and c.get("value")
                 }
 
+                reason = "no pollev.com session cookie yet"
                 if candidate.get("polleverywhere_session_id"):
                     last_candidate = candidate
-                    if _validates(host, candidate):
+                    reason = _rejection_reason(host, candidate)
+                    if reason is None:
                         status("✅ Captured a valid session cookie.")
                         try:
                             ctx.close()
                         except PlaywrightError:
                             pass
                         return candidate
-                    elif not waiting_logged:
+                    if not waiting_logged:
                         status("Session detected — waiting for you to finish logging in…")
                         waiting_logged = True
+
+                # Every 15s, say what is actually blocking. Without this a stuck
+                # capture looks identical whether the user never logged in, the
+                # login landed on another domain, or the API rejected the cookie.
+                if ticks and ticks % 15 == 0:
+                    status(f"Still waiting — {reason}")
+                    status(f"   window is on: {_page_url(ctx)}")
+                    status(f"   session cookies: {_cookie_domains(ctx)}")
 
                 # pollev.com/login hands off to id.polleverywhere.com, which has its
                 # own session. The pollev.com session only becomes the logged-in one
@@ -186,7 +215,7 @@ def capture_session_id(
         raise SessionCaptureError(f"Session capture failed: {e}") from e
 
     # Window closed before validation passed: re-check the last candidate once.
-    if last_candidate and _validates(host, last_candidate):
+    if last_candidate and _rejection_reason(host, last_candidate) is None:
         return last_candidate
 
     status(

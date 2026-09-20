@@ -12,6 +12,8 @@ import os
 import sys
 from datetime import datetime
 
+from .config import app_dir
+
 
 def _now() -> datetime:
     """Current time in the machine's local timezone (tz-aware)."""
@@ -60,6 +62,22 @@ def setup_logger(name: str = "autopollev", level: int = logging.INFO) -> logging
         handler.setLevel(level)
         handler.setFormatter(ColorFormatter("%(message)s"))
         logger.addHandler(handler)
+
+        # A windowed build has no console at all, so without this a bug report
+        # comes with nothing attached. Debug level: the diagnostics that make a
+        # failed capture readable are logged below INFO.
+        try:
+            log_path = os.path.join(app_dir(), "logs", "autopollev.log")
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            file_handler = logging.FileHandler(log_path, encoding="utf-8")
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(
+                logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+            )
+            logger.addHandler(file_handler)
+            logger.setLevel(min(level, logging.DEBUG))
+        except OSError:  # read-only install dir: console logging still works
+            pass
 
     return logger
 

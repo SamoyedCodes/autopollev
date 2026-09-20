@@ -135,8 +135,16 @@ class Auth:
 
             r.raise_for_status()
 
-            # Parse the response to check validity
-            data = r.json()
+            # Parse the response to check validity. A non-JSON body here means
+            # something answered instead of the API — a WAF bot challenge, a
+            # captive portal or a proxy login page.
+            try:
+                data = r.json()
+            except ValueError:
+                raise AuthError(
+                    f"registration_info returned HTTP {r.status_code} with a "
+                    f"non-JSON body ({r.text[:80]!r})"
+                )
             if "presenter not found" in str(data).lower():
                 raise AuthError(f"Presenter '{self.host}' does not exist.")
 
@@ -195,7 +203,13 @@ class Auth:
             r = self.session.get(url, timeout=10)
             r.raise_for_status()
             data = r.json()
-        except (requests.RequestException, ValueError):
+        except requests.RequestException as e:
+            logger.debug("profile request failed: %s", e)
+            return {}
+        except ValueError:
+            logger.debug(
+                "profile returned HTTP %s with a non-JSON body", r.status_code
+            )
             return {}
 
         user = data.get('user') or {}
