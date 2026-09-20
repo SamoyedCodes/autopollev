@@ -714,7 +714,16 @@ class AutoPollEvGUI:
         self.monitor = PollMonitor(self.auth, poll_interval=self.config.poll_interval)
         self.voter = Voter(self.auth, self.history_logger)
 
-        self.monitor.start()
+        try:
+            # start() fetches the firehose token, which can 401 in the gap
+            # after validate_cookie. Uncaught here it lands in a Tk callback,
+            # which a windowed build has no console to print.
+            self.monitor.start()
+        except CookieExpiredError as e:
+            messagebox.showerror(_("gui.error.cookie_title"), str(e))
+            self.status_label.config(text=_("gui.status.cookie_invalid"), fg=ERROR)
+            return
+
         self._monitoring = True
 
         self.status_label.config(text=_("gui.status.monitoring"), fg=SUCCESS)

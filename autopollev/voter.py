@@ -27,6 +27,14 @@ class VoteError(Exception):
     """Vote error."""
 
 
+def stdin_is_tty() -> bool:
+    """Whether there is a terminal to read keystrokes or a prompt from."""
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 class Voter:
     """
     Auto-voter.
@@ -266,14 +274,6 @@ class Voter:
             logger.error(f"❌ Unknown error: {e}")
             return None
 
-    @staticmethod
-    def _stdin_is_tty() -> bool:
-        """Whether there is a terminal to read single keystrokes from."""
-        try:
-            return sys.stdin is not None and sys.stdin.isatty()
-        except (AttributeError, ValueError, OSError):
-            return False
-
     def _input_with_timeout(self, timeout: float, max_option: int,
                             should_stop=None) -> Optional[int]:
         """
@@ -285,7 +285,7 @@ class Voter:
         :param should_stop: called each tick; truthy aborts the wait
         :return: the selected option index (0-based), or None (on timeout)
         """
-        if not self._stdin_is_tty():
+        if not stdin_is_tty():
             # Piped stdin, a service, an IDE console: putting the terminal in
             # cbreak mode raises there, which used to abandon the vote
             # entirely. Wait the countdown out and let the caller pick.

@@ -21,7 +21,7 @@ from autopollev.config import Config, ConfigError
 from autopollev.auth import (Auth, AuthError, CookieExpiredError,
                              PresenterNotFoundError, account_summary)
 from autopollev.monitor import PollMonitor
-from autopollev.voter import Voter
+from autopollev.voter import Voter, stdin_is_tty
 from autopollev.logger import setup_logger, VoteHistoryLogger
 from autopollev.i18n import _
 
@@ -94,6 +94,41 @@ def log_account(auth: Auth):
     logger.info(_("login.account_checking"))
     identity = auth.get_account_identity()
     logger.info(_("login.account", account=account_summary(identity)))
+
+
+def _recapture_session(config: Config, auth: Auth) -> bool:
+    """
+    Capture a fresh session and swap it into the running Auth.
+
+    The GUI has done this since the login window existed; the CLI used to
+    send the user to DevTools and config.json instead.
+    """
+    from autopollev.session_capture import capture_session_id, SessionCaptureError
+
+    try:
+        # Silent first: the login usually still holds in the browser profile.
+        cookies = capture_session_id(timeout=12, on_status=logger.info,
+                                     headless=True)
+        if not cookies:
+            cookies = capture_session_id(timeout=300, on_status=logger.info,
+                                         headless=False)
+    except SessionCaptureError as e:
+        logger.error(str(e))
+        return False
+
+    if not cookies:
+        return False
+
+    for key, value in cookies.items():
+        config.update_cookie(key, value)
+    auth.refresh_session(config.cookies)
+
+    try:
+        auth.validate_cookie()
+    except AuthError as e:
+        logger.error(f"❌ {e}")
+        return False
+    return True
 
 
 def run_cli(config: Config, auto_mode: bool = False):
@@ -172,8 +207,19 @@ def run_cli(config: Config, auto_mode: bool = False):
 
             except CookieExpiredError as e:
                 logger.error(f"❌ {e}")
-                logger.info(_("main.cookie_expired_input"))
+                logger.info(_("main.recapturing"))
 
+                if _recapture_session(config, auth):
+                    logger.info(_("main.cookie_refreshed"))
+                    continue
+
+                # Falling back to a hand-edited config only helps when
+                # somebody is at the keyboard to do it.
+                if not stdin_is_tty():
+                    logger.error(_("main.recapture_failed"))
+                    break
+
+                logger.info(_("main.cookie_expired_input"))
                 try:
                     input()
                     config = Config(config.config_path)

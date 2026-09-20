@@ -24,6 +24,8 @@ TRANSLATIONS: dict[str, str] = {
     'main.answer_delay': '   Waiting {delay}s before voting...',
     'main.voted_count': '📊 Polls voted: {count}',
     'main.shutdown': 'Shutdown signal received, stopping...',
+    'main.recapturing': 'Session expired — re-capturing automatically…',
+    'main.recapture_failed': 'Could not re-capture a session and nobody is at the keyboard; stopping.',
     'main.cookie_expired_input': 'Please update cookie in config.json, then press Enter to continue...',
     'main.cookie_refreshed': '✅ New cookie validated! Resuming monitoring...',
     'main.exit': 'AutoPollEv exited. Goodbye! 👋',

@@ -10,6 +10,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import main
+from autopollev.auth import CookieExpiredError
 from autopollev.logger import VoteHistoryLogger
 from autopollev.voter import Voter
 
@@ -77,6 +79,46 @@ class TornHistoryLineTests(unittest.TestCase):
             records = history.get_history()
             self.assertEqual(len(records), 1)
             self.assertEqual(history.get_stats()["success"], 1)
+
+
+class RecaptureOnExpiryTests(unittest.TestCase):
+    """The CLI used to send the user to DevTools; it re-captures now."""
+
+    def setUp(self):
+        self.config = Mock()
+        self.config.cookies = {"polleverywhere_session_id": "fresh"}
+        self.auth = Mock()
+
+    def test_saves_and_swaps_in_the_captured_cookie(self):
+        with patch("autopollev.session_capture.capture_session_id",
+                   return_value={"polleverywhere_session_id": "fresh"}) as capture:
+            self.assertTrue(main._recapture_session(self.config, self.auth))
+
+        capture.assert_called_once()  # the silent attempt was enough
+        self.config.update_cookie.assert_called_once_with(
+            "polleverywhere_session_id", "fresh"
+        )
+        self.auth.refresh_session.assert_called_once_with(self.config.cookies)
+
+    def test_falls_back_to_a_login_window_when_the_silent_try_fails(self):
+        with patch("autopollev.session_capture.capture_session_id",
+                   side_effect=[None, {"polleverywhere_session_id": "fresh"}]) as capture:
+            self.assertTrue(main._recapture_session(self.config, self.auth))
+
+        self.assertTrue(capture.call_args_list[0].kwargs["headless"])
+        self.assertFalse(capture.call_args_list[1].kwargs["headless"])
+
+    def test_reports_failure_when_nothing_is_captured(self):
+        with patch("autopollev.session_capture.capture_session_id",
+                   return_value=None):
+            self.assertFalse(main._recapture_session(self.config, self.auth))
+        self.auth.refresh_session.assert_not_called()
+
+    def test_reports_failure_when_the_new_cookie_does_not_validate(self):
+        self.auth.validate_cookie.side_effect = CookieExpiredError("still dead")
+        with patch("autopollev.session_capture.capture_session_id",
+                   return_value={"polleverywhere_session_id": "fresh"}):
+            self.assertFalse(main._recapture_session(self.config, self.auth))
 
 
 if __name__ == "__main__":
