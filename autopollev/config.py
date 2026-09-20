@@ -65,7 +65,15 @@ class Config:
             )
 
         with open(self.config_path, 'r', encoding='utf-8') as f:
-            self._data = json.load(f)
+            try:
+                self._data = json.load(f)
+            except json.JSONDecodeError as e:
+                # Not a ConfigError, this would reach a windowed build as an
+                # uncaught traceback with no console to print it to.
+                raise ConfigError(
+                    f"{self.config_path} is not valid JSON: {e}\n"
+                    f"Fix the file, or delete it to start from a fresh template."
+                )
 
         self._validate()
 
@@ -82,6 +90,18 @@ class Config:
             if key not in self._data:
                 raise ConfigError(f"Config is missing a required field: {key}")
 
+        # Duck typing turns "5" into 5555555555 ticks downstream, which reads
+        # as a hang rather than a bad setting. Reject it here instead.
+        for key in ("poll_interval", "answer_delay", "user_choice_timeout"):
+            if key in self._data:
+                try:
+                    float(self._data[key])
+                except (TypeError, ValueError):
+                    raise ConfigError(
+                        f"Config field '{key}' must be a number, "
+                        f"got {self._data[key]!r}."
+                    )
+
         cookies = self._data.get("cookies", {})
         if not cookies.get("polleverywhere_session_id") and not cookies.get("pe_auth_token"):
             raise ConfigError(
@@ -90,9 +110,13 @@ class Config:
             )
 
     def save(self):
-        """Save the current configuration to file."""
-        with open(self.config_path, 'w', encoding='utf-8') as f:
+        """Save the configuration, atomically — a torn write loses the cookie."""
+        tmp_path = f"{self.config_path}.tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(self._data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, self.config_path)
 
     @property
     def host(self) -> str:
@@ -102,17 +126,24 @@ class Config:
     def cookies(self) -> dict:
         return self._data["cookies"]
 
+    def _number(self, key: str, default: float) -> float:
+        """Read a numeric setting, tolerating a quoted number in the file."""
+        try:
+            return float(self._data.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
     @property
     def poll_interval(self) -> float:
-        return self._data.get("poll_interval", 5)
+        return self._number("poll_interval", 5)
 
     @property
     def answer_delay(self) -> float:
-        return self._data.get("answer_delay", 2)
+        return self._number("answer_delay", 2)
 
     @property
     def user_choice_timeout(self) -> float:
-        return self._data.get("user_choice_timeout", 30)
+        return self._number("user_choice_timeout", 30)
 
     @property
     def log_dir(self) -> str:

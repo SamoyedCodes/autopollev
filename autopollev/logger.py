@@ -8,6 +8,7 @@ Two channels:
 
 import json
 import logging
+import logging.handlers
 import os
 import sys
 from datetime import datetime
@@ -69,7 +70,9 @@ def setup_logger(name: str = "autopollev", level: int = logging.INFO) -> logging
         try:
             log_path = os.path.join(app_dir(), "logs", "autopollev.log")
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            file_handler = logging.FileHandler(log_path, encoding="utf-8")
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_path, maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+            )
             file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(
                 logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")

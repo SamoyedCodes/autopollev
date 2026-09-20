@@ -17,7 +17,8 @@ import time
 import signal
 
 from autopollev.config import Config, ConfigError
-from autopollev.auth import Auth, AuthError, CookieExpiredError, account_summary
+from autopollev.auth import (Auth, AuthError, CookieExpiredError,
+                             PresenterNotFoundError, account_summary)
 from autopollev.monitor import PollMonitor
 from autopollev.voter import Voter
 from autopollev.logger import setup_logger, VoteHistoryLogger
@@ -35,6 +36,20 @@ def signal_handler(signum, frame):
     _shutdown = True
     print()
     logger.info(_("main.shutdown"))
+
+
+def _show_startup_error(message: str):
+    """Show a config problem in a dialog: a windowed build has no console."""
+    try:
+        import tkinter
+        from tkinter import messagebox
+
+        root = tkinter.Tk()
+        root.withdraw()
+        messagebox.showerror("AutoPollEv", message)
+        root.destroy()
+    except Exception:  # noqa: BLE001 - no display: the log line still stands
+        pass
 
 
 def print_banner():
@@ -98,6 +113,10 @@ def run_cli(config: Config, auto_mode: bool = False):
     except CookieExpiredError as e:
         logger.error(f"❌ {e}")
         logger.error(_("main.cookie_expired_update"))
+        return 1
+    except PresenterNotFoundError as e:
+        logger.error(f"❌ {e}")
+        logger.error(_("main.presenter_hint"))
         return 1
     except AuthError as e:
         logger.warning(_("main.cookie_warn", error=e))
@@ -252,6 +271,7 @@ def main():
                 config = Config(args.config)
             except ConfigError as e2:
                 logger.info(str(e2))
+                _show_startup_error(str(e2))
                 return 0
         else:
             logger.info(str(e))

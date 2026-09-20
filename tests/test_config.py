@@ -108,5 +108,50 @@ class AppDirTests(unittest.TestCase):
             self.assertEqual(directory, Config(path).log_dir)
 
 
+class MalformedConfigTests(unittest.TestCase):
+    """A bad config file must arrive as ConfigError, never as a raw traceback."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.path = os.path.join(self.temp_dir.name, "config.json")
+
+    def _write(self, text):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def test_invalid_json_raises_config_error(self):
+        self._write('{"host": "x", ')
+        with self.assertRaises(ConfigError) as caught:
+            Config(self.path)
+        self.assertIn("not valid JSON", str(caught.exception))
+
+    def test_non_numeric_interval_is_rejected(self):
+        data = dict(DEFAULT_CONFIG, poll_interval="fast",
+                    cookies={"polleverywhere_session_id": "c"})
+        self._write(json.dumps(data))
+        with self.assertRaises(ConfigError) as caught:
+            Config(self.path)
+        self.assertIn("poll_interval", str(caught.exception))
+
+    def test_quoted_number_reads_back_as_a_number(self):
+        """'5' used to become 5555555555 ticks — a 6430-day poll interval."""
+        data = dict(DEFAULT_CONFIG, poll_interval="5",
+                    cookies={"polleverywhere_session_id": "c"})
+        self._write(json.dumps(data))
+        self.assertEqual(Config(self.path).poll_interval, 5.0)
+
+    def test_save_leaves_no_partial_file_behind(self):
+        self._write(json.dumps(dict(DEFAULT_CONFIG,
+                                    cookies={"polleverywhere_session_id": "c"})))
+        config = Config(self.path)
+        config.update_cookie("polleverywhere_session_id", "new")
+        self.assertFalse(os.path.exists(self.path + ".tmp"))
+        with open(self.path, encoding="utf-8") as handle:
+            self.assertEqual(
+                json.load(handle)["cookies"]["polleverywhere_session_id"], "new"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

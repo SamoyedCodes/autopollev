@@ -773,6 +773,9 @@ class AutoPollEvGUI:
                 break
             except Exception as e:
                 self._event_queue.put(("log", _("gui.log.network_error", error=e)))
+                # The normal wait lives in the try above, so without this a
+                # repeating error spins the loop and floods the event queue.
+                time.sleep(min(self.config.poll_interval, 5))
 
     def _process_events(self):
         """Handle events from the background thread (runs on the main thread)."""
