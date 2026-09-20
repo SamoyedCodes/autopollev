@@ -14,7 +14,7 @@ from typing import Any, Optional
 import requests
 
 from .endpoints import ENDPOINTS
-from .auth import Auth, CookieExpiredError
+from .auth import Auth, AuthError, CookieExpiredError, json_or_raise
 from .logger import setup_logger
 from .i18n import _
 
@@ -49,6 +49,7 @@ class PollMonitor:
         self._retry_count = 0
         self._max_retries = 5
         self._last_unrecognized_payload: Optional[str] = None
+        self._last_bad_response: Optional[str] = None
         self._state_lock = threading.Lock()
 
     # Keep the parser deliberately small, but accept a bounded set of common
@@ -259,7 +260,7 @@ class PollMonitor:
             self.auth.check_response_status(r)
             r.raise_for_status()
 
-            data = r.json()
+            data = json_or_raise(r, "firehose")
             self._retry_count = 0
 
             poll_info = self._extract_poll_info(data)
@@ -316,6 +317,13 @@ class PollMonitor:
 
         except CookieExpiredError:
             raise
+        except AuthError as e:
+            # Something answered that is not the API. Retrying will not help
+            # and the run looks healthy otherwise, so say it once per message.
+            if str(e) != self._last_bad_response:
+                logger.warning(_("monitor.bad_response", error=e))
+                self._last_bad_response = str(e)
+            return None
         except requests.exceptions.ReadTimeout:
             # Firehose is a long poll. A timeout means no new message arrived,
             # not that the current activity ended.

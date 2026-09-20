@@ -10,9 +10,10 @@ from autopollev.monitor import PollMonitor
 
 
 class FakeResponse:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, text="<html>challenge</html>"):
         self._payload = payload
         self.status_code = status_code
+        self.text = text
 
     def json(self):
         if isinstance(self._payload, Exception):
@@ -245,6 +246,22 @@ class PollMonitorDetectionTests(unittest.TestCase):
         monitor.mark_answered(poll["uid"])
 
         self.assertEqual(1, monitor.answered_count)
+
+
+class NonJsonResponseTests(unittest.TestCase):
+    """A WAF challenge or proxy page must be named, not counted as a hiccup."""
+
+    def test_html_body_is_reported_once_and_does_not_raise(self):
+        monitor = PollMonitor(FakeAuth(
+            FakeResponse(ValueError("no json")),
+            FakeResponse(ValueError("no json")),
+        ))
+
+        with patch("autopollev.monitor.logger") as log:
+            self.assertIsNone(monitor.check_new_poll())
+            self.assertIsNone(monitor.check_new_poll())
+
+        self.assertEqual(log.warning.call_count, 1)
 
 
 if __name__ == "__main__":

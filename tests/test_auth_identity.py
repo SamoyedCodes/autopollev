@@ -5,14 +5,15 @@ from unittest.mock import patch
 
 import requests
 
-from autopollev.auth import Auth, account_summary
+from autopollev.auth import Auth, AuthError, account_summary, json_or_raise
 from autopollev.session_capture import _rejection_reason
 
 
 class FakeResponse:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, text="<html>nope</html>"):
         self._payload = payload
         self.status_code = status_code
+        self.text = text
 
     def json(self):
         if isinstance(self._payload, Exception):
@@ -120,6 +121,21 @@ class SessionValidationTests(unittest.TestCase):
         }
 
         self.assertIsNone(_rejection_reason({"polleverywhere_session_id": "x"}))
+
+
+class JsonOrRaiseTests(unittest.TestCase):
+    def test_names_the_endpoint_and_status(self):
+        response = FakeResponse(ValueError("no json"), status_code=202,
+                                text="<html>challenge</html>")
+        with self.assertRaises(AuthError) as caught:
+            json_or_raise(response, "registration_info")
+        message = str(caught.exception)
+        self.assertIn("registration_info", message)
+        self.assertIn("202", message)
+        self.assertIn("challenge", message)
+
+    def test_passes_json_through(self):
+        self.assertEqual(json_or_raise(FakeResponse({"ok": 1}), "profile"), {"ok": 1})
 
 
 if __name__ == "__main__":

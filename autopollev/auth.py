@@ -31,6 +31,24 @@ class PresenterNotFoundError(AuthError):
     """The configured presenter id does not exist — a setting to fix, not a login."""
 
 
+def json_or_raise(response, what: str):
+    """
+    Parse a JSON API response, or say what answered instead.
+
+    Every PollEv endpoint here can be answered by something that is not the
+    API — a WAF bot challenge, a captive portal, a TLS-intercepting proxy. That
+    arrives as a 2xx with an HTML body, so it has to be named at the parse
+    site; swallowed as "not valid yet" it is indistinguishable from a bug.
+    """
+    try:
+        return response.json()
+    except ValueError:
+        raise AuthError(
+            f"{what} returned HTTP {response.status_code} with a non-JSON body "
+            f"({response.text[:80]!r})"
+        )
+
+
 def account_summary(identity: dict) -> str:
     """
     Turn an identity dict (from :meth:`Auth.get_account_identity`) into a single
@@ -106,7 +124,7 @@ class Auth:
         try:
             r = self.session.get(url, timeout=10)
             r.raise_for_status()
-            return r.json()['token']
+            return json_or_raise(r, "csrf_token")['token']
         except (requests.RequestException, KeyError) as e:
             raise AuthError(f"Failed to fetch CSRF token: {e}")
 
@@ -139,16 +157,7 @@ class Auth:
 
             r.raise_for_status()
 
-            # Parse the response to check validity. A non-JSON body here means
-            # something answered instead of the API — a WAF bot challenge, a
-            # captive portal or a proxy login page.
-            try:
-                data = r.json()
-            except ValueError:
-                raise AuthError(
-                    f"registration_info returned HTTP {r.status_code} with a "
-                    f"non-JSON body ({r.text[:80]!r})"
-                )
+            data = json_or_raise(r, "registration_info")
             if "presenter not found" in str(data).lower():
                 raise PresenterNotFoundError(f"Presenter '{self.host}' does not exist.")
 
@@ -181,8 +190,7 @@ class Auth:
                 )
 
             r.raise_for_status()
-            token = r.json().get('firehose_token')
-            return token
+            return json_or_raise(r, "registration_info").get('firehose_token')
 
         except requests.RequestException as e:
             if isinstance(e, (AuthError, CookieExpiredError)):
@@ -206,14 +214,12 @@ class Auth:
         try:
             r = self.session.get(url, timeout=10)
             r.raise_for_status()
-            data = r.json()
+            data = json_or_raise(r, "profile")
         except requests.RequestException as e:
             logger.debug("profile request failed: %s", e)
             return {}
-        except ValueError:
-            logger.debug(
-                "profile returned HTTP %s with a non-JSON body", r.status_code
-            )
+        except AuthError as e:
+            logger.debug("%s", e)
             return {}
 
         user = data.get('user') or {}

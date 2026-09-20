@@ -15,7 +15,7 @@ import requests
 from typing import Optional
 
 from .endpoints import ENDPOINTS
-from .auth import Auth, CookieExpiredError
+from .auth import Auth, AuthError, CookieExpiredError, json_or_raise
 from .logger import setup_logger, VoteHistoryLogger
 from .notifier import notify_new_poll
 from .i18n import _
@@ -59,9 +59,11 @@ class Voter:
             r = self.auth.session.get(url, timeout=10)
             self.auth.check_response_status(r)
             r.raise_for_status()
-            return r.json()
+            return json_or_raise(r, f"poll {poll_uid}")
         except CookieExpiredError:
             raise
+        except AuthError as e:
+            raise VoteError(str(e))
         except requests.RequestException as e:
             raise VoteError(f"Failed to fetch poll options: {e}")
 
