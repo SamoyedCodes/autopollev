@@ -44,6 +44,16 @@ ENDPOINTS = {
         'multiple_choice_polls/{uid}?include=collection'
     ),
 
+    # A survey: several polls pushed as one Firehose activation
+    'survey': (
+        'https://pollev.com/proxy/api/participant/surveys/{uid}?include=polls'
+    ),
+
+    # This participant's own responses to a survey's polls
+    'survey_results': (
+        'https://pollev.com/proxy/api/participant/surveys/{uid}/results'
+    ),
+
     # Submit a vote
     'respond_to_poll': (
         'https://pollev.com/proxy/api/participant/'

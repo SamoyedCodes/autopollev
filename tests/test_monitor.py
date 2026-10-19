@@ -163,6 +163,38 @@ class PollMonitorDetectionTests(unittest.TestCase):
 
         self.assertIsNone(poll)
 
+    def test_closed_poll_empty_object_resets_active_poll(self):
+        # Live Firehose reply after the presenter closes a poll.
+        closed = {"message": "{}", "last_sequence": 28}
+        active = {"message": json.dumps({"uid": "poll-again"})}
+        monitor = self.make_monitor(active, closed, active)
+
+        monitor.mark_answered(monitor.check_new_poll()["uid"])
+        with self.assertNoLogs("autopollev.monitor", level="WARNING"):
+            self.assertIsNone(monitor.check_new_poll())
+        self.assertEqual("poll-again", monitor.check_new_poll()["uid"])
+
+    def test_survey_hands_out_its_unanswered_open_polls(self):
+        # Live Firehose message for khchan's "Macro Lecture 3" survey.
+        survey = {"message": json.dumps(
+            {"type": "survey", "uid": "GNe54d5OSoE5QxfiEbtNT", "private": False}
+        ), "last_sequence": 29}
+        polls = {"polls": [
+            {"id": 1, "permalink": "by-hand", "type": "multiple_choice_poll", "state": "opened"},
+            {"id": 2, "permalink": "closed", "type": "multiple_choice_poll", "state": "closed"},
+            {"id": 3, "permalink": "open", "type": "multiple_choice_poll", "state": "opened"},
+        ]}
+        results = [{"poll_id": 1, "value": "answered on pollev.com"}]
+        monitor = self.make_monitor(survey, polls, results, survey, polls, results)
+
+        poll = monitor.check_new_poll()
+        self.assertEqual("open", poll["uid"])
+        self.assertEqual("GNe54d5OSoE5QxfiEbtNT", poll["survey_uid"])
+
+        monitor.mark_answered("open")
+        self.assertIsNone(monitor.check_new_poll())
+        self.assertEqual(1, monitor.answered_count)
+
     def test_unrecognized_payload_is_logged_once(self):
         payload = {"message": {"event": "heartbeat"}}
         monitor = self.make_monitor(payload, payload)

@@ -181,8 +181,10 @@ class PollMonitor:
             visible_keys = keys[:12]
             if len(keys) > len(visible_keys):
                 visible_keys.append("...")
+            # Decode string wrappers so the log shows the message's keys,
+            # not just "message:str".
             wrapper_types = [
-                f"{key}:{type(payload[key]).__name__}"
+                f"{key}:{cls._payload_summary(cls._decode_json_string(payload[key]))}"
                 for key in cls._WRAPPER_KEYS
                 if key in payload
             ]
@@ -205,8 +207,9 @@ class PollMonitor:
         wrapper_values = [
             payload[key] for key in cls._WRAPPER_KEYS if key in payload
         ]
+        # Firehose sends message "{}" once the presenter closes a poll.
         return bool(wrapper_values) and all(
-            value in (None, "") or value == [] for value in wrapper_values
+            not cls._decode_json_string(value) for value in wrapper_values
         )
 
     def _init_firehose(self):
@@ -286,7 +289,6 @@ class PollMonitor:
             if not poll_uid:
                 return None
 
-            current_time = time.time()
             with self._state_lock:
                 if poll_uid != self._active_poll_uid:
                     # Suppression applies only to the current activation. If
@@ -295,6 +297,14 @@ class PollMonitor:
                     self._active_poll_uid = poll_uid
                     self._answered_polls.clear()
 
+            if poll_info.get("type") == "survey":
+                poll_info = self._next_survey_poll(poll_uid)
+                if not poll_info:
+                    return None
+                poll_uid = poll_info["uid"]
+
+            current_time = time.time()
+            with self._state_lock:
                 if (
                     poll_uid in self._answered_polls
                     or poll_uid in self._in_flight_polls
@@ -340,6 +350,50 @@ class PollMonitor:
                 )
                 self._init_firehose()
             return None
+
+    def _next_survey_poll(self, survey_uid: str) -> Optional[dict]:
+        """Pick the survey's next open poll that has no answer yet.
+
+        A survey arrives as one Firehose activation holding several polls.
+        Polls already answered, here or by hand on pollev.com, are skipped so
+        a manual answer is never overwritten.
+        """
+        with self._state_lock:
+            if self._in_flight_polls:
+                # One survey poll at a time, so GUI dialogs never stack.
+                return None
+
+        # ponytail: two requests per tick while a survey is open; cache them
+        # if the poll interval ever drops well below a few seconds.
+        def fetch(name):
+            r = self.auth.session.get(
+                ENDPOINTS[name].format(uid=survey_uid), timeout=5
+            )
+            self.auth.check_response_status(r)
+            r.raise_for_status()
+            return json_or_raise(r, name)
+
+        polls = fetch('survey').get('polls', [])
+        answered_ids = {r.get('poll_id') for r in fetch('survey_results')}
+
+        now = time.time()
+        with self._state_lock:
+            for poll in polls:
+                uid = poll.get('permalink')
+                if (
+                    uid
+                    and poll.get('type') == 'multiple_choice_poll'
+                    and poll.get('state') == 'opened'
+                    and poll.get('id') not in answered_ids
+                    and uid not in self._answered_polls
+                    # Skip one that just failed, so it can't block the rest.
+                    and not (
+                        uid == self._last_poll_uid
+                        and now - self._last_poll_time < 15
+                    )
+                ):
+                    return {**poll, 'uid': uid, 'survey_uid': survey_uid}
+        return None
 
     def mark_answered(self, poll_uid: str):
         """Complete a successful claim and suppress duplicate processing."""
