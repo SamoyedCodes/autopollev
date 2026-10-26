@@ -195,6 +195,31 @@ class PollMonitorDetectionTests(unittest.TestCase):
         self.assertIsNone(monitor.check_new_poll())
         self.assertEqual(1, monitor.answered_count)
 
+    def test_expired_token_is_refreshed_not_reported_as_unknown(self):
+        # Live reply once the token is ~30 min old: a 200 with an error.
+        expired = {"message": json.dumps({"error": {
+            "type": "UnauthorizedSubscription",
+            "message": "You are not authorized to subscribe to receive this message",
+        }}), "last_sequence": 36}
+        monitor = self.make_monitor(expired)
+        monitor._firehose_token = "old"
+        monitor.auth.get_firehose_token = lambda: "fresh"
+
+        with self.assertNoLogs("autopollev.monitor", level="WARNING"):
+            self.assertIsNone(monitor.check_new_poll())
+        self.assertEqual("fresh", monitor._firehose_token)
+
+    def test_free_text_poll_is_skipped_quietly(self):
+        free_text = {"message": json.dumps(
+            {"type": "free_text_poll", "uid": "4PlfwuBDNf2mYxzi13D3M"}
+        )}
+        monitor = self.make_monitor(free_text, free_text)
+
+        with self.assertLogs("autopollev.monitor", level="INFO") as logs:
+            self.assertIsNone(monitor.check_new_poll())
+            self.assertIsNone(monitor.check_new_poll())
+        self.assertEqual(1, sum("free_text_poll" in line for line in logs.output))
+
     def test_unrecognized_payload_is_logged_once(self):
         payload = {"message": {"event": "heartbeat"}}
         monitor = self.make_monitor(payload, payload)

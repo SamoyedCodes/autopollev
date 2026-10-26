@@ -787,6 +787,7 @@ class AutoPollEvGUI:
                     self._event_queue.put(("new_poll", {
                         "uid": poll_uid,
                         "type": poll_type,
+                        "survey_uid": poll_info.get("survey_uid"),
                     }))
 
                 # Wait for the next round
@@ -947,13 +948,14 @@ class AutoPollEvGUI:
             self._append_log(_("gui.log.submitting", choice=option_value))
 
             result = active_voter._submit_vote(
-                poll_uid, option_id, option_value, poll_title
+                poll_uid, option_id, option_value, poll_title,
+                poll_info.get("survey_uid"),
             )
 
             # Update UI: only a real success counts as a success
             success = result is not None and result.get("status") == "success"
 
-            if success:
+            if success or (result or {}).get("status") == "answered":
                 active_monitor.mark_answered(poll_uid)
                 completed = True
 

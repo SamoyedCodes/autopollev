@@ -184,15 +184,18 @@ def run_cli(config: Config, auto_mode: bool = False):
                         break
 
                     if auto_mode:
-                        result = voter.vote(poll_uid)
+                        result = voter.vote(
+                            poll_uid, survey_uid=poll_info.get('survey_uid')
+                        )
                     else:
                         result = voter.interactive_vote(
                             poll_uid,
                             timeout=config.user_choice_timeout,
                             should_stop=lambda: _shutdown,
+                            survey_uid=poll_info.get('survey_uid'),
                         )
 
-                    if result and result.get("status") == "success":
+                    if result and result.get("status") in ("success", "answered"):
                         monitor.mark_answered(poll_uid)
                         logger.info(_("main.voted_count", count=monitor.answered_count))
                     else:

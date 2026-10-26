@@ -50,6 +50,7 @@ class PollMonitor:
         self._max_retries = 5
         self._last_unrecognized_payload: Optional[str] = None
         self._last_bad_response: Optional[str] = None
+        self._skipped_uid: Optional[str] = None
         self._state_lock = threading.Lock()
 
     # Keep the parser deliberately small, but accept a bounded set of common
@@ -266,6 +267,22 @@ class PollMonitor:
             data = json_or_raise(r, "firehose")
             self._retry_count = 0
 
+            message = (
+                self._decode_json_string(data.get("message"))
+                if isinstance(data, dict) else None
+            )
+            if (
+                self._firehose_token
+                and isinstance(message, dict)
+                and message.get("error")
+            ):
+                # A token stops working ~30 min after it is issued. Firehose
+                # says so with a 200 and an UnauthorizedSubscription message,
+                # so every poll after that looked like an unknown payload.
+                logger.info(_("monitor.firehose_expired"))
+                self._init_firehose()
+                return None
+
             poll_info = self._extract_poll_info(data)
             if not poll_info:
                 if self._is_empty_firehose_payload(data):
@@ -287,6 +304,15 @@ class PollMonitor:
             poll_uid = poll_info.get('uid')
 
             if not poll_uid:
+                return None
+
+            poll_type = poll_info.get("type")
+            if poll_type not in ("multiple_choice_poll", "survey", "unknown"):
+                # Only multiple-choice polls have a vote endpoint; fetching
+                # any other kind fails and was retried every few seconds.
+                if poll_uid != self._skipped_uid:
+                    logger.info(_("monitor.unsupported_poll", type=poll_type))
+                    self._skipped_uid = poll_uid
                 return None
 
             with self._state_lock:

@@ -76,7 +76,8 @@ class Voter:
             raise VoteError(f"Failed to fetch poll options: {e}")
 
     def _submit_vote(self, poll_uid: str, option_id: int,
-                     option_value: str, poll_title: str) -> Optional[dict]:
+                     option_value: str, poll_title: str,
+                     survey_uid: Optional[str] = None) -> Optional[dict]:
         """
         Submit a vote to the PollEv server.
 
@@ -84,23 +85,40 @@ class Voter:
         :param option_id: option id
         :param option_value: option display text
         :param poll_title: poll title
+        :param survey_uid: the activated survey this poll belongs to, if any
         :return: the response data
         """
         # Get a CSRF token
         csrf_token = self.auth.get_csrf_token()
 
-        # Submit the vote
-        url = ENDPOINTS['respond_to_poll'].format(uid=poll_uid)
-        r = self.auth.session.post(
-            url,
-            headers={'x-csrf-token': csrf_token},
-            data={
-                'option_id': option_id,
-                'isPending': True,
-                'source': 'pollev_page',
-            },
-            timeout=10,
-        )
+        if survey_uid:
+            # While only the survey is activated, the poll's own results URL
+            # is a 404; the web client posts through the survey instead.
+            # ponytail: always the multi-page source; a one-page survey
+            # (is_full_page) sends activated_one_page_survey if PollEv
+            # ever starts rejecting the mismatch.
+            r = self.auth.session.post(
+                ENDPOINTS['survey_results'].format(uid=survey_uid),
+                headers={'x-csrf-token': csrf_token},
+                json=[{
+                    'option_id': option_id,
+                    'participant_key': poll_uid,
+                    'activity_type': 'multiple_choice_poll',
+                    'source': 'activated_multi_page_survey',
+                }],
+                timeout=10,
+            )
+        else:
+            r = self.auth.session.post(
+                ENDPOINTS['respond_to_poll'].format(uid=poll_uid),
+                headers={'x-csrf-token': csrf_token},
+                data={
+                    'option_id': option_id,
+                    'isPending': True,
+                    'source': 'pollev_page',
+                },
+                timeout=10,
+            )
 
         self.auth.check_response_status(r)
 
@@ -112,6 +130,11 @@ class Voter:
                 if 'locked' in error_detail:
                     logger.warning("🔒 Poll is locked; the presenter hasn't opened voting yet.")
                     return {"status": "locked", "code": 422}
+                if 'no longer respond' in error_detail:
+                    # Answered already, usually by hand on pollev.com.
+                    # Retrying only re-asks the user and fails again.
+                    logger.info("☑️ Already answered this poll; skipping it.")
+                    return {"status": "answered", "code": 422}
             except (ValueError, KeyError):
                 pass
 
@@ -134,13 +157,16 @@ class Voter:
 
         try:
             data = r.json()
-            if isinstance(data, dict):
-                data["status"] = status
-            return data
         except ValueError:
-            return {"status": status, "code": r.status_code}
+            data = None
+        # The survey endpoint answers with a list; callers read .get().
+        if not isinstance(data, dict):
+            data = {"code": r.status_code}
+        data["status"] = status
+        return data
 
-    def vote(self, poll_uid: str) -> Optional[dict]:
+    def vote(self, poll_uid: str,
+             survey_uid: Optional[str] = None) -> Optional[dict]:
         """
         Vote randomly on the given poll (auto mode, no user wait).
 
@@ -174,7 +200,8 @@ class Voter:
             logger.info(_("vote.options", options=[o.get('value', o.get('keyword', '?')) for o in options]))
             logger.info(_("vote.random_choice", choice=option_value))
 
-            return self._submit_vote(poll_uid, option_id, option_value, poll_title)
+            return self._submit_vote(poll_uid, option_id, option_value,
+                                     poll_title, survey_uid)
 
         except CookieExpiredError:
             raise
@@ -191,7 +218,8 @@ class Voter:
             return None
 
     def interactive_vote(self, poll_uid: str, timeout: float = 30,
-                         should_stop=None) -> Optional[dict]:
+                         should_stop=None,
+                         survey_uid: Optional[str] = None) -> Optional[dict]:
         """
         Interactive vote: show options, wait for user input, auto-submit a
         random choice on timeout.
@@ -258,7 +286,8 @@ class Voter:
             option_id = selected.get('id')
             option_value = selected.get('value', selected.get('keyword', 'Unknown option'))
 
-            return self._submit_vote(poll_uid, option_id, option_value, poll_title)
+            return self._submit_vote(poll_uid, option_id, option_value,
+                                     poll_title, survey_uid)
 
         except CookieExpiredError:
             raise

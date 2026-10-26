@@ -58,6 +58,8 @@ TRANSLATIONS: dict[str, str] = {
     'monitor.stopped': 'Monitoring stopped.',
     'monitor.retrying_firehose': 'Network error {n} times in a row, refreshing Firehose token...',
     'monitor.bad_response': '⚠️ PollEv did not answer with data: {error}',
+    'monitor.firehose_expired': 'Firehose token expired, fetching a new one...',
+    'monitor.unsupported_poll': 'A {type} is open; only multiple-choice polls can be answered, so answer this one yourself.',
     'monitor.unrecognized_payload': 'Firehose returned an unrecognized payload; skipping it: {payload}',
     'vote.poll_title': '🎯 Poll: {title}',
     'vote.options': '   Options: {options}',
