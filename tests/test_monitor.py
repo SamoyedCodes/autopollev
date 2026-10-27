@@ -209,16 +209,30 @@ class PollMonitorDetectionTests(unittest.TestCase):
             self.assertIsNone(monitor.check_new_poll())
         self.assertEqual("fresh", monitor._firehose_token)
 
-    def test_free_text_poll_is_skipped_quietly(self):
+    def test_free_text_poll_is_claimed_once(self):
         free_text = {"message": json.dumps(
             {"type": "free_text_poll", "uid": "4PlfwuBDNf2mYxzi13D3M"}
         )}
         monitor = self.make_monitor(free_text, free_text)
 
-        with self.assertLogs("autopollev.monitor", level="INFO") as logs:
-            self.assertIsNone(monitor.check_new_poll())
-            self.assertIsNone(monitor.check_new_poll())
-        self.assertEqual(1, sum("free_text_poll" in line for line in logs.output))
+        poll = monitor.check_new_poll()
+        self.assertEqual('free_text_poll', poll['type'])
+        self.assertIsNone(monitor.check_new_poll())
+
+    def test_survey_selects_unanswered_text_poll(self):
+        survey = {'message': {'type': 'survey', 'uid': 'survey'}}
+        polls = {'polls': [
+            {'id': 1, 'permalink': 'answered', 'type': 'free_text_poll', 'state': 'opened'},
+            {'id': 2, 'permalink': 'text', 'type': 'free_text_poll', 'state': 'opened'},
+        ]}
+        monitor = self.make_monitor(survey, polls, [{'poll_id': 1}])
+        poll = monitor.check_new_poll()
+        self.assertEqual('text', poll['uid'])
+        self.assertEqual('survey', poll['survey_uid'])
+
+    def test_other_question_formats_are_still_skipped(self):
+        monitor = self.make_monitor({'message': {'type': 'ranking_poll', 'uid': 'ranking'}})
+        self.assertIsNone(monitor.check_new_poll())
 
     def test_unrecognized_payload_is_logged_once(self):
         payload = {"message": {"event": "heartbeat"}}

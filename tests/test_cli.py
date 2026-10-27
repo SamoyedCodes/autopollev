@@ -1,6 +1,7 @@
 """Regression tests for CLI-only paths (--cli / --auto / --history)."""
 
 import json
+import io
 import os
 import sys
 import tempfile
@@ -63,6 +64,75 @@ class AbortDuringCountdownTests(unittest.TestCase):
                                             should_stop=lambda: True)
 
         self.assertIsNone(result)
+        voter._submit_vote.assert_not_called()
+
+
+class TextInputTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX terminal only')
+    def test_pasted_unicode_answer_on_posix(self):
+        import pty
+        import threading
+        import tty
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        terminal = os.fdopen(slave, encoding='utf-8')
+        self.addCleanup(terminal.close)
+        ready = threading.Event()
+        original_cbreak = tty.setcbreak
+        def set_cbreak(fd):
+            original_cbreak(fd)
+            ready.set()
+        def paste():
+            if ready.wait(2):
+                os.write(master, 'café\n'.encode())
+        writer = threading.Thread(target=paste)
+        writer.start()
+        try:
+            with patch('sys.stdin', terminal), patch('sys.stdout', new_callable=io.StringIO), \
+                    patch('tty.setcbreak', side_effect=set_cbreak):
+                self.assertEqual('café', make_voter()._input_with_timeout(2, None))
+        finally:
+            writer.join(3)
+
+    def read_text(self, characters):
+        clock = [0.0]
+        keyboard = Mock()
+        chars = iter(characters)
+        keyboard.getwch.side_effect = lambda: next(chars, '')
+        keyboard.kbhit.return_value = True
+        with patch('autopollev.voter.stdin_is_tty', return_value=True), \
+                patch('autopollev.voter.sys.platform', 'win32'), \
+                patch.dict(sys.modules, {'msvcrt': keyboard}), \
+                patch('autopollev.voter.time.monotonic', side_effect=lambda: clock[0]), \
+                patch('autopollev.voter.time.sleep', side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)), \
+                patch('sys.stdout', new_callable=io.StringIO):
+            return make_voter()._input_with_timeout(1, None)
+
+    def test_blank_enter_does_not_submit_and_unicode_backspace_work(self):
+        self.assertEqual('café', self.read_text(' \r caféx\x08\r'))
+
+    def test_unsubmitted_draft_is_discarded_on_timeout(self):
+        self.assertIsNone(self.read_text('unfinished'))
+
+    def test_manual_and_timeout_answers_reach_shared_submission(self):
+        for answer, expected in [('My answer', 'My answer'), (None, 'Not sure')]:
+            with self.subTest(answer=answer), patch('autopollev.voter.notify_new_poll'), \
+                    patch('sys.stdout', new_callable=io.StringIO):
+                voter = make_voter()
+                voter.get_poll_options = Mock(return_value={'title': 'Question', 'state': 'opened'})
+                voter._input_with_timeout = Mock(return_value=answer)
+                voter._submit_vote = Mock()
+                voter.interactive_vote('text', poll_type='free_text_poll', survey_uid='survey')
+                voter._submit_vote.assert_called_once_with(
+                    'text', None, expected, 'Question', 'survey', 'free_text_poll')
+
+    def test_stop_request_prevents_text_fallback_submission(self):
+        voter = make_voter()
+        voter.get_poll_options = Mock(return_value={'title': 'Question'})
+        voter._input_with_timeout = Mock(return_value=None)
+        voter._submit_vote = Mock()
+        with patch('autopollev.voter.notify_new_poll'), patch('sys.stdout', new_callable=io.StringIO):
+            voter.interactive_vote('text', poll_type='free_text_poll', should_stop=lambda: True)
         voter._submit_vote.assert_not_called()
 
 

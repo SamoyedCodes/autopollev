@@ -79,6 +79,20 @@ def main():
         with patch("autopollev.gui.random.randint", return_value=0):
             dialog._on_timeout()
         assert dialog.selected_index == 0
+        with patch.object(PollDialog, "_start_countdown"):
+            dialog = PollDialog(root, 'Explain your answer', [], poll_type='free_text_poll')
+        root.update()
+        assert dialog.answer_entry.winfo_ismapped()
+        dialog._on_submit_text()
+        assert dialog.winfo_exists()
+        dialog.answer_entry.insert(0, 'My answer')
+        dialog._on_submit_text()
+        assert dialog.answer == 'My answer'
+        with patch.object(PollDialog, "_start_countdown"):
+            dialog = PollDialog(root, 'Text timeout', [], poll_type='free_text_poll')
+        dialog.answer_entry.insert(0, 'unfinished draft')
+        dialog._on_timeout()
+        assert dialog.answer == 'Not sure'
         print("GUI smoke checks passed.", flush=True)
         if "--preview" in sys.argv:
             root.geometry("640x480+120+120")

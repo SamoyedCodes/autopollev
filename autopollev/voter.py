@@ -9,8 +9,9 @@ Fetches poll options and submits votes. Two modes:
 
 import random
 import time
-import threading
 import sys
+import os
+import codecs
 import requests
 from typing import Optional
 
@@ -53,7 +54,8 @@ class Voter:
         self.history = history_logger
         self._last_locked_poll = None
 
-    def get_poll_options(self, poll_uid: str) -> dict:
+    def get_poll_options(self, poll_uid: str,
+                         poll_type: str = 'multiple_choice_poll') -> dict:
         """
         Fetch a poll's option details.
 
@@ -62,7 +64,11 @@ class Voter:
         :raises VoteError: if the request fails
         :raises CookieExpiredError: when the cookie is expired
         """
-        url = ENDPOINTS['poll_data'].format(uid=poll_uid)
+        if poll_type == 'unknown':
+            poll_type = 'multiple_choice_poll'
+        if poll_type not in ('multiple_choice_poll', 'free_text_poll'):
+            raise VoteError(f"Unsupported poll type: {poll_type}")
+        url = ENDPOINTS['poll_data'].format(uid=poll_uid, poll_type=poll_type)
         try:
             r = self.auth.session.get(url, timeout=10)
             self.auth.check_response_status(r)
@@ -75,9 +81,10 @@ class Voter:
         except requests.RequestException as e:
             raise VoteError(f"Failed to fetch poll options: {e}")
 
-    def _submit_vote(self, poll_uid: str, option_id: int,
+    def _submit_vote(self, poll_uid: str, option_id: int | None,
                      option_value: str, poll_title: str,
-                     survey_uid: Optional[str] = None) -> Optional[dict]:
+                     survey_uid: Optional[str] = None,
+                     poll_type: str = 'multiple_choice_poll') -> Optional[dict]:
         """
         Submit a vote to the PollEv server.
 
@@ -88,6 +95,18 @@ class Voter:
         :param survey_uid: the activated survey this poll belongs to, if any
         :return: the response data
         """
+        if poll_type == 'free_text_poll':
+            # Enable only after a real client request verifies the text payload.
+            logger.warning(_("vote.text_unverified"))
+            self.history.record_vote(
+                poll_id=poll_uid, poll_title=poll_title,
+                selected_option=option_value, selected_option_id=None,
+                status='blocked', response_code=0,
+            )
+            return {'status': 'blocked', 'code': 0}
+        if poll_type not in ('multiple_choice_poll', 'unknown'):
+            raise VoteError(f"Unsupported poll type: {poll_type}")
+
         # Get a CSRF token
         csrf_token = self.auth.get_csrf_token()
 
@@ -166,7 +185,8 @@ class Voter:
         return data
 
     def vote(self, poll_uid: str,
-             survey_uid: Optional[str] = None) -> Optional[dict]:
+             survey_uid: Optional[str] = None,
+             poll_type: str = 'multiple_choice_poll') -> Optional[dict]:
         """
         Vote randomly on the given poll (auto mode, no user wait).
 
@@ -174,7 +194,7 @@ class Voter:
         :return: the vote response data, or None (on failure)
         """
         try:
-            poll_data = self.get_poll_options(poll_uid)
+            poll_data = self.get_poll_options(poll_uid, poll_type)
             options = poll_data.get('options', [])
             poll_title = poll_data.get('title', 'Untitled')
 
@@ -186,6 +206,10 @@ class Voter:
                 return {"status": "locked", "code": 422}
 
             self._last_locked_poll = None
+
+            if poll_type == 'free_text_poll':
+                return self._submit_vote(poll_uid, None, 'Not sure', poll_title,
+                                         survey_uid, poll_type)
 
             if not options:
                 # Do not record vote history for polls without options (likely closed or unsupported)
@@ -219,7 +243,8 @@ class Voter:
 
     def interactive_vote(self, poll_uid: str, timeout: float = 30,
                          should_stop=None,
-                         survey_uid: Optional[str] = None) -> Optional[dict]:
+                         survey_uid: Optional[str] = None,
+                         poll_type: str = 'multiple_choice_poll') -> Optional[dict]:
         """
         Interactive vote: show options, wait for user input, auto-submit a
         random choice on timeout.
@@ -231,7 +256,7 @@ class Voter:
         :return: the vote response data, or None
         """
         try:
-            poll_data = self.get_poll_options(poll_uid)
+            poll_data = self.get_poll_options(poll_uid, poll_type)
             options = poll_data.get('options', [])
             poll_title = poll_data.get('title', 'Untitled')
 
@@ -244,7 +269,8 @@ class Voter:
 
             self._last_locked_poll = None
 
-            if not options:
+            is_text = poll_type == 'free_text_poll'
+            if not options and not is_text:
                 # Do not record vote history for polls without options (likely closed or unsupported)
                 logger.warning(f"Poll [{poll_uid}] has no options (state: {state}), skipping.")
                 return None
@@ -262,12 +288,16 @@ class Voter:
             print(f"{'='*50}\033[0m")
             for i, val in enumerate(option_values, 1):
                 print(f"  \033[93m[{i}]\033[0m {val}")
-            print(f"\n  ⏳ Enter an option number within {int(timeout)}s (a random choice is made on timeout)")
+            if is_text:
+                print(_("dialog.text_unavailable"))
+                print(_("vote.text_prompt", timeout=timeout))
+            else:
+                print(f"\n  ⏳ Enter an option number within {int(timeout)}s (a random choice is made on timeout)")
             print(f"  \033[90m{'─'*50}\033[0m")
 
             # Wait for user input (with timeout)
             user_choice = self._input_with_timeout(
-                timeout, len(options), should_stop
+                timeout, None if is_text else len(options), should_stop
             )
 
             if should_stop is not None and should_stop():
@@ -275,6 +305,11 @@ class Voter:
                 # ran to timeout and voted anyway on the way out.
                 logger.info(_("vote.aborted"))
                 return None
+
+            if is_text:
+                answer = user_choice if user_choice is not None else 'Not sure'
+                return self._submit_vote(poll_uid, None, answer, poll_title,
+                                         survey_uid, poll_type)
 
             if user_choice is not None:
                 selected = options[user_choice]
@@ -303,30 +338,30 @@ class Voter:
             logger.error(f"❌ Unknown error: {e}")
             return None
 
-    def _input_with_timeout(self, timeout: float, max_option: int,
-                            should_stop=None) -> Optional[int]:
+    def _input_with_timeout(self, timeout: float, max_option: int | None,
+                            should_stop=None) -> int | str | None:
         """
         User input with a timeout and countdown. Avoids the built-in input()
         so it does not block background threads.
 
         :param timeout: timeout in seconds
-        :param max_option: the highest valid option number
+        :param max_option: the highest valid option number, or None for text
         :param should_stop: called each tick; truthy aborts the wait
-        :return: the selected option index (0-based), or None (on timeout)
+        :return: option index, submitted text, or None on timeout/cancellation
         """
         if not stdin_is_tty():
             # Piped stdin, a service, an IDE console: putting the terminal in
             # cbreak mode raises there, which used to abandon the vote
             # entirely. Wait the countdown out and let the caller pick.
-            logger.info(_("vote.no_terminal", timeout=int(timeout)))
-            end_time = time.time() + timeout
-            while time.time() < end_time:
+            logger.info(_("vote.no_terminal", timeout=timeout))
+            end_time = time.monotonic() + timeout
+            while time.monotonic() < end_time:
                 if should_stop is not None and should_stop():
                     return None
                 time.sleep(0.1)
             return None
 
-        start_time = time.time()
+        start_time = time.monotonic()
         result_str = ""
         last_remaining = int(timeout) + 1
 
@@ -337,15 +372,17 @@ class Voter:
             fd = sys.stdin.fileno()
             old_settings = termios.tcgetattr(fd)
             tty.setcbreak(fd)
+            decoder = codecs.getincrementaldecoder(sys.stdin.encoding or 'utf-8')()
 
         try:
-            while time.time() - start_time < timeout:
+            while time.monotonic() - start_time < timeout:
                 if should_stop is not None and should_stop():
                     return None
-                remaining = int(timeout - (time.time() - start_time))
+                remaining = int(timeout - (time.monotonic() - start_time))
                 if remaining != last_remaining:
                     # \033[K clears to end of line
-                    sys.stdout.write(f"\r  ⏳ {remaining}s left | >>> Enter option number: {result_str}\033[K")
+                    prompt = 'Enter answer' if max_option is None else 'Enter option number'
+                    sys.stdout.write(f"\r  ⏳ {remaining}s left | >>> {prompt}: {result_str}\033[K")
                     sys.stdout.flush()
                     last_remaining = remaining
 
@@ -353,18 +390,26 @@ class Voter:
                 if sys.platform == 'win32':
                     import msvcrt
                     if msvcrt.kbhit():
-                        try:
-                            char = msvcrt.getch().decode('utf-8')
-                        except UnicodeDecodeError:
-                            pass
+                        char = msvcrt.getwch()
+                        if char in ('\x00', '\xe0'):
+                            msvcrt.getwch()  # Discard an extended key's scan code.
+                            char = None
                 else:
                     import select
                     if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
-                        char = sys.stdin.read(1)
+                        # TextIO read-ahead hides pasted characters from select().
+                        char = decoder.decode(os.read(fd, 1))
 
                 if char:
                     if char in ('\r', '\n'):
                         print()
+                        if max_option is None:
+                            if result_str.strip():
+                                return result_str.strip()
+                            print(_("vote.text_blank"))
+                            result_str = ""
+                            last_remaining = -1
+                            continue
                         try:
                             choice = int(result_str.strip())
                             if 1 <= choice <= max_option:
@@ -392,5 +437,5 @@ class Voter:
                 import termios
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-        print(f"\r  ⏰ Time's up! Auto-selecting...\033[K")
+        print("\r  ⏰ Time's up! Using the fallback answer...\033[K")
         return None

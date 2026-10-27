@@ -307,9 +307,8 @@ class PollMonitor:
                 return None
 
             poll_type = poll_info.get("type")
-            if poll_type not in ("multiple_choice_poll", "survey", "unknown"):
-                # Only multiple-choice polls have a vote endpoint; fetching
-                # any other kind fails and was retried every few seconds.
+            if poll_type not in ("multiple_choice_poll", "free_text_poll", "survey", "unknown"):
+                # Other formats need their own input and submission handling.
                 if poll_uid != self._skipped_uid:
                     logger.info(_("monitor.unsupported_poll", type=poll_type))
                     self._skipped_uid = poll_uid
@@ -408,7 +407,7 @@ class PollMonitor:
                 uid = poll.get('permalink')
                 if (
                     uid
-                    and poll.get('type') == 'multiple_choice_poll'
+                    and poll.get('type') in ('multiple_choice_poll', 'free_text_poll')
                     and poll.get('state') == 'opened'
                     and poll.get('id') not in answered_ids
                     and uid not in self._answered_polls

@@ -98,7 +98,7 @@ class VoteHistoryLogger:
         os.makedirs(log_dir, exist_ok=True)
 
     def record_vote(self, poll_id: str, poll_title: str,
-                    selected_option: str, selected_option_id: int,
+                    selected_option: str, selected_option_id: int | None,
                     status: str, response_code: int):
         """
         Record a single vote.

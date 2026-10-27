@@ -1,8 +1,10 @@
 """Survey polls are answered through their survey, not the poll URL."""
 
 import unittest
+from unittest.mock import Mock
 
-from autopollev.voter import Voter
+from autopollev.voter import Voter, VoteError
+from autopollev.auth import CookieExpiredError
 
 
 class FakeResponse:
@@ -84,6 +86,57 @@ class SurveyVoteTests(unittest.TestCase):
         result = Voter(auth, FakeHistory())._submit_vote("Irw5", 7, "A", "Q")
 
         self.assertEqual("answered", result["status"])
+
+
+class TextVoteTests(unittest.TestCase):
+    def test_unverified_submission_is_blocked_without_network_access(self):
+        for survey_uid in (None, 'survey'):
+            with self.subTest(survey_uid=survey_uid):
+                auth, history = Mock(), Mock()
+                voter = Voter(auth, history)
+                result = voter._submit_vote('text', None, 'Not sure', 'Question',
+                                            survey_uid, 'free_text_poll')
+                self.assertEqual('blocked', result['status'])
+                auth.get_csrf_token.assert_not_called()
+                auth.session.post.assert_not_called()
+                history.record_vote.assert_called_once_with(
+                    poll_id='text', poll_title='Question', selected_option='Not sure',
+                    selected_option_id=None, status='blocked', response_code=0,
+                )
+
+    def test_auto_text_uses_fallback_and_no_option_id(self):
+        voter = Voter(Mock(), Mock())
+        voter.get_poll_options = Mock(return_value={'title': 'Question', 'state': 'opened'})
+        voter._submit_vote = Mock()
+        voter.vote('text', survey_uid='survey', poll_type='free_text_poll')
+        voter._submit_vote.assert_called_once_with(
+            'text', None, 'Not sure', 'Question', 'survey', 'free_text_poll')
+
+    def test_locked_text_poll_does_not_submit(self):
+        voter = Voter(Mock(), Mock())
+        voter.get_poll_options = Mock(return_value={'title': 'Question', 'state': 'closed'})
+        voter._submit_vote = Mock()
+        for method in (voter.vote, voter.interactive_vote):
+            self.assertEqual('locked', method('text', poll_type='free_text_poll')['status'])
+        voter._submit_vote.assert_not_called()
+
+    def test_details_use_explicit_type_and_reject_unsupported_types(self):
+        auth = Mock()
+        auth.session.get.return_value.json.return_value = {'title': 'Question'}
+        voter = Voter(auth, Mock())
+        self.assertEqual({'title': 'Question'}, voter.get_poll_options('text', 'free_text_poll'))
+        self.assertIn('/free_text_polls/text?', auth.session.get.call_args.args[0])
+        with self.assertRaises(VoteError):
+            voter.get_poll_options('text', '../unexpected')
+        self.assertEqual(1, auth.session.get.call_count)
+
+    def test_text_fetch_preserves_expired_session_error(self):
+        auth = Mock()
+        auth.check_response_status.side_effect = CookieExpiredError('expired')
+        voter = Voter(auth, Mock())
+        for method in (voter.vote, voter.interactive_vote):
+            with self.assertRaises(CookieExpiredError):
+                method('text', poll_type='free_text_poll')
 
 
 if __name__ == "__main__":

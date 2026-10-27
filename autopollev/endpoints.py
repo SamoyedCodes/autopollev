@@ -41,7 +41,7 @@ ENDPOINTS = {
     # Get poll option details
     'poll_data': (
         'https://pollev.com/proxy/api/participant/'
-        'multiple_choice_polls/{uid}?include=collection'
+        '{poll_type}s/{uid}?include=collection'
     ),
 
     # A survey: several polls pushed as one Firehose activation

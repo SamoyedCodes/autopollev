@@ -9,10 +9,18 @@ was fixed, see [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md).
 ### Features
 - Detects new polls through Poll Everywhere's Firehose endpoint, so there is
   very little delay.
-- Shows a popup with a button per option and a countdown, so you can pick an
-  answer yourself.
+- Shows a popup with a button per option, or a text field for free-text
+  questions, and a countdown so you can answer yourself.
 - If you do not answer before the countdown ends (30 seconds by default), it
   picks a random option and submits that.
+- Recognizes free-text questions (including word clouds), standalone or in
+  surveys. Text entry works in the GUI and interactive CLI. At timeout, or
+  when the popup is closed, the fallback is exactly `Not sure`, even if an
+  unfinished draft exists. `--auto` selects that fallback without prompting.
+  **Text submission is currently blocked:** its endpoint and payload still
+  need verification against a real Poll Everywhere client request. The app
+  warns you to answer on pollev.com and records blocked attempts with no
+  option ID; it does not send an unverified request. MCQ submission is unchanged.
 - Dark-themed Tkinter GUI with an editable host field, monitoring status, a
   resizable vote history table, and a log panel you can show or hide.
 - Logs you in through a built-in browser window and stores the session cookie
@@ -73,7 +81,7 @@ was fixed, see [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md).
    | `polleverywhere_session_id` | Session cookie, filled in by the login window |
    | `poll_interval` | How often to check for a new poll, in seconds |
    | `answer_delay` | How long to wait before submitting a vote, in seconds |
-   | `user_choice_timeout` | How long to wait for your answer before voting randomly |
+   | `user_choice_timeout` | Seconds before the fallback: random MCQ option or `Not sure` for text (text submission currently blocked) |
    | `log_dir` | Where run logs and vote history go (`logs/` by default) |
 
    Pasting the cookie in yourself from DevTools still works if you would rather

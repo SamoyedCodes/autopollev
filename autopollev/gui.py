@@ -16,6 +16,7 @@ import sys
 import time
 import queue
 import textwrap
+import math
 from typing import Optional
 
 from .config import Config, ConfigError
@@ -81,12 +82,11 @@ class PollDialog(tk.Toplevel):
     """
     New-poll dialog.
 
-    Shows the poll title and option buttons with a countdown progress bar.
-    The user picks an option, or a random one is submitted on timeout.
+    Shows choices or a text field with a countdown and a type-specific fallback.
     """
 
     def __init__(self, parent, poll_title: str, options: list[dict],
-                 timeout: float = 30):
+                 timeout: float = 30, poll_type: str = 'multiple_choice_poll'):
         super().__init__(parent)
         self.title(_("dialog.title"))
         self.configure(bg=BG)
@@ -95,8 +95,11 @@ class PollDialog(tk.Toplevel):
         self.poll_title = poll_title
         self.options = options
         self.timeout = timeout
+        self.is_text = poll_type == 'free_text_poll'
+        self.answer: Optional[str] = None
         self.selected_index: Optional[int] = None
         self._cancelled = False
+        self._timer_id = None
 
         # Keep the window on top
         self.attributes("-topmost", True)
@@ -116,6 +119,8 @@ class PollDialog(tk.Toplevel):
         # Force the alert to surface
         self.lift()
         self.focus_force()
+        if self.is_text:
+            self.answer_entry.focus_set()
         self.bell()
 
         # If the parent window is minimized, restore it
@@ -146,11 +151,20 @@ class PollDialog(tk.Toplevel):
         options_frame.pack(fill="x")
 
         tk.Label(
-            options_frame, text=_("dialog.prompt"),
+            options_frame, text=_("dialog.text_prompt" if self.is_text else "dialog.prompt"),
             font=(UI_FONT, 10), fg=MUTED, bg=BG
         ).pack(anchor="w", pady=(0, 8))
 
-        for i, option in enumerate(self.options):
+        if self.is_text:
+            tk.Label(options_frame, text=_("dialog.text_unavailable"),
+                     fg=WARNING, bg=BG, wraplength=400, justify="left").pack(anchor="w")
+            self.answer_entry = ttk.Entry(options_frame, width=48)
+            self.answer_entry.pack(fill="x", pady=3)
+            self.answer_entry.bind("<Return>", lambda event: self._on_submit_text())
+            ttk.Button(options_frame, text=_("dialog.submit"),
+                       command=self._on_submit_text).pack(anchor="e", pady=3)
+
+        for i, option in enumerate([] if self.is_text else self.options):
             value = option.get('value', option.get('keyword', f'Option {i+1}'))
 
             btn = ttk.Button(
@@ -167,7 +181,8 @@ class PollDialog(tk.Toplevel):
 
         self.countdown_label = tk.Label(
             countdown_frame,
-            text=_("dialog.countdown", sec=int(self.timeout)),
+            text=_("dialog.text_countdown" if self.is_text else "dialog.countdown",
+                   sec=math.ceil(self.timeout)),
             font=(UI_FONT, 9), fg=MUTED, bg=BG
         )
         self.countdown_label.pack(anchor="w")
@@ -193,36 +208,60 @@ class PollDialog(tk.Toplevel):
 
     def _start_countdown(self):
         """Start the countdown."""
-        self._remaining = self.timeout
+        self._deadline = time.monotonic() + self.timeout
         self._tick()
 
     def _tick(self):
         """Update the countdown once per second."""
-        if self._cancelled or self.selected_index is not None:
+        if self._cancelled:
             return
 
-        self._remaining -= 1
+        self._remaining = max(0, self._deadline - time.monotonic())
         self.progress["value"] = max(0, self._remaining)
         self.countdown_label.config(
-            text=_("dialog.countdown", sec=max(0, int(self._remaining)))
+            text=_("dialog.text_countdown" if self.is_text else "dialog.countdown",
+                   sec=math.ceil(self._remaining))
         )
 
         if self._remaining <= 0:
             self._on_timeout()
         else:
-            self.after(1000, self._tick)
+            self._timer_id = self.after(min(1000, max(1, math.ceil(self._remaining * 1000))), self._tick)
 
     def _on_select(self, index: int):
         """The user selected an option."""
+        if self._cancelled:
+            return
         self.selected_index = index
+        self._finish()
+
+    def _on_submit_text(self):
+        if self._cancelled:
+            return
+        answer = self.answer_entry.get().strip()
+        if not answer:
+            self.bell()
+            self.answer_entry.focus_set()
+            return
+        self.answer = answer
+        self._finish()
+
+    def _finish(self):
+        self._cancelled = True
+        if self._timer_id is not None:
+            self.after_cancel(self._timer_id)
+            self._timer_id = None
         self.destroy()
 
     def _on_timeout(self):
-        """Timeout — pick a random option automatically."""
-        if self.selected_index is None:
+        """Timeout or window close — use the poll's fallback answer."""
+        if self._cancelled:
+            return
+        if self.is_text:
+            self.answer = 'Not sure'
+        elif self.selected_index is None:
             self.selected_index = random.randint(0, len(self.options) - 1)
-        self._cancelled = True
-        self.destroy()
+        self._finish()
 
 
 class AutoPollEvGUI:
@@ -886,10 +925,12 @@ class AutoPollEvGUI:
         if not active_voter or not active_monitor:
             return
         poll_uid = poll_info["uid"]
+        poll_type = poll_info.get("type", "unknown")
+        is_text = poll_type == 'free_text_poll'
         completed = False
 
         try:
-            poll_data = active_voter.get_poll_options(poll_uid)
+            poll_data = active_voter.get_poll_options(poll_uid, poll_type)
             options = poll_data.get('options', [])
             poll_title = poll_data.get('title', 'Untitled')
             state = poll_data.get('state', 'opened')
@@ -903,7 +944,7 @@ class AutoPollEvGUI:
 
             self._last_locked_poll = None
 
-            if not options:
+            if not options and not is_text:
                 self._append_log(_("gui.log.no_options", uid=poll_uid))
                 return
 
@@ -917,7 +958,7 @@ class AutoPollEvGUI:
             # Pop up the selection dialog
             dialog = PollDialog(
                 self.root, poll_title, options,
-                timeout=self.config.user_choice_timeout
+                timeout=self.config.user_choice_timeout, poll_type=poll_type
             )
 
             # Wait for the dialog to close
@@ -933,16 +974,14 @@ class AutoPollEvGUI:
                 return
 
             # Get the user's choice
-            selected_idx = dialog.selected_index
-            if selected_idx is not None:
-                selected = options[selected_idx]
+            if is_text:
+                option_id = None
+                option_value = dialog.answer
             else:
-                selected = random.choice(options)
-
-            option_id = selected.get('id')
-            option_value = selected.get(
-                'value', selected.get('keyword', 'Unknown option')
-            )
+                selected_idx = dialog.selected_index
+                selected = options[selected_idx] if selected_idx is not None else random.choice(options)
+                option_id = selected.get('id')
+                option_value = selected.get('value', selected.get('keyword', 'Unknown option'))
 
             # Submit the vote
             self._append_log(_("gui.log.submitting", choice=option_value))
@@ -950,6 +989,7 @@ class AutoPollEvGUI:
             result = active_voter._submit_vote(
                 poll_uid, option_id, option_value, poll_title,
                 poll_info.get("survey_uid"),
+                poll_type,
             )
 
             # Update UI: only a real success counts as a success
