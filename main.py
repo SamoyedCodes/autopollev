@@ -84,7 +84,7 @@ def print_history(history_logger: VoteHistoryLogger):
         print(f"\n\033[96m  {_('history.recent', n=len(history))}\033[0m")
         for record in history:
             ts = record['timestamp'][:19]
-            status_icon = "✅" if record['status'] == 'success' else "❌"
+            status_icon = {"success": "✅", "answered": "☑️"}.get(record["status"], "❌")
             print(f"  {status_icon} [{ts}] {record['poll_title'][:25]} → {record['selected_option']}")
     print()
 

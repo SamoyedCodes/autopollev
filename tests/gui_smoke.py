@@ -28,7 +28,7 @@ def main():
         )
         for index in range(50):
             gui._add_history_row("2026-09-07 12:30:00", f"Question {index}: Example poll",
-                                 "A sample answer", index % 2 == 0)
+                                 "A sample answer", "success" if index % 2 == 0 else "failed")
             gui._append_log(f"Mock event {index}: waiting for the next poll.")
         root.update()
         assert not gui.history_empty.winfo_ismapped()

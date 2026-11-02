@@ -17,11 +17,18 @@ class FakeResponse:
     def json(self):
         return self.payload
 
+    def raise_for_status(self):
+        pass
+
 
 class FakeSession:
-    def __init__(self, response):
+    def __init__(self, response, own_results):
         self.response = response
+        self.own_results = own_results
         self.posts = []
+
+    def get(self, url, **kwargs):
+        return FakeResponse(200, self.own_results)
 
     def post(self, url, **kwargs):
         self.posts.append((url, kwargs))
@@ -29,8 +36,8 @@ class FakeSession:
 
 
 class FakeAuth:
-    def __init__(self, response=None):
-        self.session = FakeSession(response or FakeResponse())
+    def __init__(self, response=None, own_results=()):
+        self.session = FakeSession(response or FakeResponse(), list(own_results))
 
     @staticmethod
     def get_csrf_token():
@@ -46,11 +53,17 @@ class FakeHistory:
         pass
 
 
+# A survey poll as get_poll_options returned it live on 2 Nov: its
+# participant_key is not its permalink.
+SURVEY_POLL = {"id": 83442780, "title": "Highly leveraged",
+               "participant_key": "tXHleNyFoVvRUpQ0QX7IX"}
+
+
 class SurveyVoteTests(unittest.TestCase):
     def test_survey_poll_posts_to_the_survey_results_url(self):
         auth = FakeAuth()
         result = Voter(auth, FakeHistory())._submit_vote(
-            "QUGYOkwvPQYmr6ZzgssoD", 7, "Bank reserves.", "Macro 4",
+            "xJovpwnYhjYZM8kTuOuSo", 7, "Bank reserves.", SURVEY_POLL,
             survey_uid="x3OGh4BIQclN49wJ3bBaE",
         )
 
@@ -59,7 +72,8 @@ class SurveyVoteTests(unittest.TestCase):
         self.assertEqual(
             [{
                 "option_id": 7,
-                "participant_key": "QUGYOkwvPQYmr6ZzgssoD",
+                # The permalink here was a 404 ResourceNotFound.
+                "participant_key": "tXHleNyFoVvRUpQ0QX7IX",
                 "activity_type": "multiple_choice_poll",
                 "source": "activated_multi_page_survey",
             }],
@@ -69,7 +83,7 @@ class SurveyVoteTests(unittest.TestCase):
 
     def test_lone_poll_still_posts_to_its_own_results_url(self):
         auth = FakeAuth()
-        Voter(auth, FakeHistory())._submit_vote("solo", 7, "A", "Solo")
+        Voter(auth, FakeHistory())._submit_vote("solo", 7, "A", {"id": 1})
 
         url, kwargs = auth.session.posts[0]
         self.assertTrue(url.endswith("/multiple_choice_polls/solo/results"))
@@ -83,9 +97,24 @@ class SurveyVoteTests(unittest.TestCase):
             "detail": [{"message": "You can no longer respond to this "
                         "activity: it allows up to 1 responses per participant"}],
         }}))
-        result = Voter(auth, FakeHistory())._submit_vote("Irw5", 7, "A", "Q")
+        result = Voter(auth, FakeHistory())._submit_vote("Irw5", 7, "A", {"id": 1})
 
         self.assertEqual("answered", result["status"])
+
+    def test_answer_given_by_hand_during_the_dialog_is_never_overwritten(self):
+        # Live 2 Nov: answered in the browser at 10:01:48 while the dialog
+        # was open; the timeout fallback was posted at 10:02:12.
+        for survey_uid in (None, "FXmx5TTCqCuoWqE9A9Qrh"):
+            with self.subTest(survey_uid=survey_uid):
+                auth = FakeAuth(own_results=[
+                    {"poll_id": 1, "value": "another poll"},
+                    {"poll_id": 83442780, "value": "both."},
+                ])
+                result = Voter(auth, FakeHistory())._submit_vote(
+                    "xJovpwnYhjYZM8kTuOuSo", 7, "random", SURVEY_POLL, survey_uid)
+
+                self.assertEqual({"status": "answered", "value": "both."}, result)
+                self.assertEqual([], auth.session.posts)
 
 
 class TextVoteTests(unittest.TestCase):
@@ -94,7 +123,7 @@ class TextVoteTests(unittest.TestCase):
             with self.subTest(survey_uid=survey_uid):
                 auth, history = Mock(), Mock()
                 voter = Voter(auth, history)
-                result = voter._submit_vote('text', None, 'Not sure', 'Question',
+                result = voter._submit_vote('text', None, 'Not sure', {'title': 'Question'},
                                             survey_uid, 'free_text_poll')
                 self.assertEqual('blocked', result['status'])
                 auth.get_csrf_token.assert_not_called()
@@ -110,7 +139,8 @@ class TextVoteTests(unittest.TestCase):
         voter._submit_vote = Mock()
         voter.vote('text', survey_uid='survey', poll_type='free_text_poll')
         voter._submit_vote.assert_called_once_with(
-            'text', None, 'Not sure', 'Question', 'survey', 'free_text_poll')
+            'text', None, 'Not sure', voter.get_poll_options.return_value,
+            'survey', 'free_text_poll')
 
     def test_locked_text_poll_does_not_submit(self):
         voter = Voter(Mock(), Mock())

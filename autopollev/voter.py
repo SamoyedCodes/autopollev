@@ -81,8 +81,25 @@ class Voter:
         except requests.RequestException as e:
             raise VoteError(f"Failed to fetch poll options: {e}")
 
+    def _own_answer(self, poll_uid: str, poll_data: dict,
+                    survey_uid: Optional[str]) -> Optional[str]:
+        """This participant's current answer to the poll, or None if unanswered."""
+        url = (ENDPOINTS['survey_results'].format(uid=survey_uid) if survey_uid
+               else ENDPOINTS['respond_to_poll'].format(uid=poll_uid))
+        try:
+            r = self.auth.session.get(url, timeout=10)
+            self.auth.check_response_status(r)
+            r.raise_for_status()
+            results = json_or_raise(r, "own results")
+        except requests.RequestException as e:
+            raise VoteError(f"Could not check for an existing answer: {e}")
+        for result in results:
+            if result.get('poll_id') == poll_data.get('id'):
+                return str(result.get('value'))
+        return None
+
     def _submit_vote(self, poll_uid: str, option_id: int | None,
-                     option_value: str, poll_title: str,
+                     option_value: str, poll_data: dict,
                      survey_uid: Optional[str] = None,
                      poll_type: str = 'multiple_choice_poll') -> Optional[dict]:
         """
@@ -91,10 +108,11 @@ class Voter:
         :param poll_uid: poll unique identifier
         :param option_id: option id
         :param option_value: option display text
-        :param poll_title: poll title
+        :param poll_data: the poll as get_poll_options returned it
         :param survey_uid: the activated survey this poll belongs to, if any
         :return: the response data
         """
+        poll_title = poll_data.get('title', 'Untitled')
         if poll_type == 'free_text_poll':
             # Enable only after a real client request verifies the text payload.
             logger.warning(_("vote.text_unverified"))
@@ -106,6 +124,19 @@ class Voter:
             return {'status': 'blocked', 'code': 0}
         if poll_type not in ('multiple_choice_poll', 'unknown'):
             raise VoteError(f"Unsupported poll type: {poll_type}")
+
+        # Polls allow edited answers, so posting would replace an answer given
+        # by hand on pollev.com while the dialog was open. Check right before
+        # posting; the monitor's check ran when the poll was first seen.
+        mine = self._own_answer(poll_uid, poll_data, survey_uid)
+        if mine is not None:
+            logger.info(_("vote.already_answered", choice=mine))
+            self.history.record_vote(
+                poll_id=poll_uid, poll_title=poll_title,
+                selected_option=mine, selected_option_id=None,
+                status='answered', response_code=0,
+            )
+            return {'status': 'answered', 'value': mine}
 
         # Get a CSRF token
         csrf_token = self.auth.get_csrf_token()
@@ -121,7 +152,9 @@ class Voter:
                 headers={'x-csrf-token': csrf_token},
                 json=[{
                     'option_id': option_id,
-                    'participant_key': poll_uid,
+                    # A survey poll's participant_key differs from its
+                    # permalink; the permalink is a 404 ResourceNotFound.
+                    'participant_key': poll_data.get('participant_key', poll_uid),
                     'activity_type': 'multiple_choice_poll',
                     'source': 'activated_multi_page_survey',
                 }],
@@ -208,7 +241,7 @@ class Voter:
             self._last_locked_poll = None
 
             if poll_type == 'free_text_poll':
-                return self._submit_vote(poll_uid, None, 'Not sure', poll_title,
+                return self._submit_vote(poll_uid, None, 'Not sure', poll_data,
                                          survey_uid, poll_type)
 
             if not options:
@@ -225,7 +258,7 @@ class Voter:
             logger.info(_("vote.random_choice", choice=option_value))
 
             return self._submit_vote(poll_uid, option_id, option_value,
-                                     poll_title, survey_uid)
+                                     poll_data, survey_uid)
 
         except CookieExpiredError:
             raise
@@ -308,7 +341,7 @@ class Voter:
 
             if is_text:
                 answer = user_choice if user_choice is not None else 'Not sure'
-                return self._submit_vote(poll_uid, None, answer, poll_title,
+                return self._submit_vote(poll_uid, None, answer, poll_data,
                                          survey_uid, poll_type)
 
             if user_choice is not None:
@@ -322,7 +355,7 @@ class Voter:
             option_value = selected.get('value', selected.get('keyword', 'Unknown option'))
 
             return self._submit_vote(poll_uid, option_id, option_value,
-                                     poll_title, survey_uid)
+                                     poll_data, survey_uid)
 
         except CookieExpiredError:
             raise

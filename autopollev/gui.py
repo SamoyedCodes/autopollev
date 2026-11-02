@@ -78,6 +78,12 @@ WARNING = "#F1CA7F"
 ERROR = "#F28B96"
 
 
+def _status_text(status: Optional[str]) -> str:
+    """History-table label for a vote status."""
+    return _({"success": "gui.vote.success",
+              "answered": "gui.vote.answered"}.get(status, "gui.vote.failed"))
+
+
 class PollDialog(tk.Toplevel):
     """
     New-poll dialog.
@@ -557,17 +563,16 @@ class AutoPollEvGUI:
             ts = record.get("timestamp", "")[:19]
             title = record.get("poll_title", "")
             option = record.get("selected_option", "")
-            status = _("gui.vote.success" if record.get("status") == "success" else "gui.vote.failed")
-            self.history_tree.insert("", "end", values=(ts, title, option, status))
+            self.history_tree.insert("", "end", values=(ts, title, option, _status_text(record.get("status"))))
         if records:
             self.history_empty.place_forget()
         else:
             self.history_empty.place(relx=0.5, rely=0.5, y=14, anchor="center")
 
     def _add_history_row(self, timestamp: str, title: str,
-                         option: str, success: bool):
+                         option: str, status: Optional[str]):
         """Add a row to the top of the history table."""
-        status = _("gui.vote.success" if success else "gui.vote.failed")
+        status = _status_text(status)
         self.history_empty.place_forget()
         self.history_tree.insert("", 0, values=(timestamp, title, option, status))
 
@@ -987,28 +992,27 @@ class AutoPollEvGUI:
             self._append_log(_("gui.log.submitting", choice=option_value))
 
             result = active_voter._submit_vote(
-                poll_uid, option_id, option_value, poll_title,
+                poll_uid, option_id, option_value, poll_data,
                 poll_info.get("survey_uid"),
                 poll_type,
             )
 
-            # Update UI: only a real success counts as a success
-            success = result is not None and result.get("status") == "success"
-
-            if success or (result or {}).get("status") == "answered":
+            status = (result or {}).get("status")
+            if status in ("success", "answered"):
                 active_monitor.mark_answered(poll_uid)
                 completed = True
+            # The answer that stands, which is the hand-given one if answered.
+            option_value = (result or {}).get("value", option_value)
 
             ts = time.strftime("%Y-%m-%d %H:%M:%S")
-            self._add_history_row(ts, poll_title, str(option_value), success)
+            self._add_history_row(ts, poll_title, str(option_value), status)
 
             count = active_monitor.answered_count
             self.vote_count_label.config(text=str(count))
 
-            if success:
-                self._append_log(_("gui.log.vote_ok", title=poll_title, choice=option_value))
-            else:
-                self._append_log(_("gui.log.vote_fail", title=poll_title, choice=option_value))
+            log_key = {"success": "gui.log.vote_ok", "answered": "gui.log.vote_answered"}
+            self._append_log(_(log_key.get(status, "gui.log.vote_fail"),
+                               title=poll_title, choice=option_value))
 
         except CookieExpiredError:
             self._event_queue.put(("error", _("gui.error.cookie_expired_short")))

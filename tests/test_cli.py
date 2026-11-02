@@ -124,7 +124,8 @@ class TextInputTests(unittest.TestCase):
                 voter._submit_vote = Mock()
                 voter.interactive_vote('text', poll_type='free_text_poll', survey_uid='survey')
                 voter._submit_vote.assert_called_once_with(
-                    'text', None, expected, 'Question', 'survey', 'free_text_poll')
+                    'text', None, expected, voter.get_poll_options.return_value,
+                    'survey', 'free_text_poll')
 
     def test_stop_request_prevents_text_fallback_submission(self):
         voter = make_voter()

@@ -97,6 +97,7 @@ class PollClaimResolutionTests(unittest.TestCase):
 
         for status, answered, retryable in (
             ("success", True, False),
+            ("answered", True, False),
             ("failed", False, True),
         ):
             with self.subTest(status=status), patch(
@@ -134,7 +135,8 @@ class PollClaimResolutionTests(unittest.TestCase):
                 patch('autopollev.gui.notify_new_poll'):
             gui._handle_new_poll({'uid': 'text', 'type': 'free_text_poll', 'survey_uid': 'survey'})
         gui.voter._submit_vote.assert_called_once_with(
-            'text', None, 'Not sure', 'Question', 'survey', 'free_text_poll')
+            'text', None, 'Not sure', gui.voter.get_poll_options.return_value,
+            'survey', 'free_text_poll')
         gui.monitor.mark_answered.assert_not_called()
         gui.monitor.mark_retryable.assert_called_once_with('text')
 
