@@ -52,6 +52,7 @@ logs/
 Thumbs.db
 
 # Special .md
+AGENTS.md
 original_plan.md
 revision_plan.md
 
