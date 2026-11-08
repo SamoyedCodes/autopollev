@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="350" viewBox="0 0 1280 350" role="img" aria-labelledby="title desc">
+  <title id="title">Watch, choose, review</title>
+  <desc id="desc">AutoPollEv detects new polls through Firehose, gives you time to choose before a random multiple-choice fallback, and records results while preserving manual answers.</desc>
+  <rect width="1280" height="350" rx="20" fill="#181818"/>
+  <g font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+    <text x="40" y="45" fill="#a0a0a0" font-size="14" letter-spacing="3">FROM NEW POLL TO RECORDED RESPONSE</text>
+    <g fill="#212121" stroke="#353535">
+      <rect x="40" y="74" width="380" height="236" rx="12"/>
+      <rect x="450" y="74" width="380" height="236" rx="12"/>
+      <rect x="860" y="74" width="380" height="236" rx="12"/>
+    </g>
+    <g fill="#85d6a1" font-size="14" font-weight="600">
+      <text x="66" y="110">01 / WATCH</text>
+      <text x="476" y="110">02 / CHOOSE</text>
+      <text x="886" y="110">03 / REVIEW</text>
+    </g>
+    <g fill="none" stroke="#ececec" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M72 158v10m11-17v24m11-31v38m11-31v24m11-17v10"/>
+      <circle cx="502" cy="163" r="22"/>
+      <path d="M502 149v15l9 5"/>
+      <rect x="886" y="141" width="40" height="46" rx="5"/>
+      <path d="M895 154h21m-21 10h21m-21 10h13"/>
+    </g>
+    <g fill="#ececec" font-size="24" font-weight="600">
+      <text x="66" y="222">Catch the next question</text>
+      <text x="476" y="222">Take your time</text>
+      <text x="886" y="222">See what happened</text>
+    </g>
+    <g fill="#a0a0a0" font-size="16">
+      <text x="66" y="255">Live detection, including surveys.</text>
+      <text x="66" y="281">Session and Firehose token refresh.</text>
+      <text x="476" y="255">Choose before the countdown ends.</text>
+      <text x="476" y="281">Random MCQ fallback at timeout.</text>
+      <text x="886" y="255">Vote history and runtime logs.</text>
+      <text x="886" y="281">Keeps answers given on pollev.com.</text>
+    </g>
+    <g fill="none" stroke="#85d6a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M429 188h12m-5-5 5 5-5 5M839 188h12m-5-5 5 5-5 5"/>
+    </g>
+  </g>
+</svg>

@@ -3,8 +3,8 @@
 # version numbers below from the tag; these are the untagged-build fallback.
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 0, 0),
-    prodvers=(2, 0, 0, 0),
+    filevers=(2, 1, 1, 0),
+    prodvers=(2, 1, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,12 +17,12 @@ VSVersionInfo(
       StringTable('040904B0', [
         StringStruct('CompanyName', 'SamoyedCodes'),
         StringStruct('FileDescription', 'AutoPollEv - PollEverywhere automation tool'),
-        StringStruct('FileVersion', '2.0.0.0'),
+        StringStruct('FileVersion', '2.1.1.0'),
         StringStruct('InternalName', 'AutoPollEv'),
         StringStruct('LegalCopyright', 'MIT License'),
         StringStruct('OriginalFilename', 'AutoPollEv.exe'),
         StringStruct('ProductName', 'AutoPollEv'),
-        StringStruct('ProductVersion', '2.0.0.0')])
+        StringStruct('ProductVersion', '2.1.1.0')])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
